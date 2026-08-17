@@ -1,5 +1,7 @@
 # Zotero Connectors
 
+**English** | [**简体中文**](README_zh.md)
+
 [![Build Status](https://travis-ci.org/zotero/zotero-connectors.svg?branch=master)](https://travis-ci.org/zotero/zotero-connectors)
 
 > **Fork note**: this fork adds **AI-powered collection & tag recommendations** on top of
@@ -34,14 +36,6 @@ recommend a **collection (分组)** and **tags (标签)** based on the title and
 Notes: requests go directly from your browser to the configured endpoint and the API
 key is stored in the extension's local storage. Multi-item saves and saves to
 zotero.org (when the Zotero client is offline) are skipped.
-
-### 安装使用（中文说明）
-
-1. 从 [Releases](https://github.com/buptweixin/zotero-connectors/releases) 下载 zip 并解压
-1. `chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选择解压出的目录
-1. 扩展设置 → General → AI Recommendations，启用并填写 LLM 接口（Base URL / API Key /
-   模型名），点 Test Connection 验证
-1. 保存论文时，进度窗口会出现 AI 建议的分组和标签，点 Apply 应用；也可在设置里开启自动应用
 
 ## Building
 

@@ -134,6 +134,7 @@ var backgroundInclude = [
 	'oauthsimple.js',
 	'proxy.js',
 	'connector.js',
+	'aiRecommender.js',
 	'updaterFix.js',
 	'repo.js',
 	'translate/debug.js',

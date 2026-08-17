@@ -68,7 +68,15 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 			done: Zotero.getString('general_done'),
 			tagsPlaceholder: Zotero.getString('progressWindow_tagPlaceholder'),
 			filterPlaceholder: Zotero.getString('progressWindow_filterPlaceholder'),
-			addNotePlaceholder: Zotero.getString('progressWindow_noteEditorPlaceholder')
+			addNotePlaceholder: Zotero.getString('progressWindow_noteEditorPlaceholder'),
+			aiLabel: Zotero.getString('progressWindow_ai_label'),
+			aiAnalyzing: Zotero.getString('progressWindow_ai_analyzing'),
+			aiApply: Zotero.getString('progressWindow_ai_apply'),
+			aiApplied: Zotero.getString('progressWindow_ai_applied'),
+			aiUnavailable: Zotero.getString('progressWindow_ai_unavailable'),
+			aiNewCollection: Zotero.getString('progressWindow_ai_newCollection'),
+			aiNewCollectionTooltip: Zotero.getString('progressWindow_ai_newCollectionTooltip'),
+			aiDismiss: Zotero.getString('progressWindow_ai_dismiss')
 		};
 		
 		this.expandedRowsCache = {};
@@ -104,9 +112,11 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 		this.expandToTarget = this.expandToTarget.bind(this);
 		this.updateSelectedTags = this.updateSelectedTags.bind(this);
 		this.onTagAutocompleteShown = this.onTagAutocompleteShown.bind(this);
+		this.onAISuggestionApply = this.onAISuggestionApply.bind(this);
+		this.onAISuggestionDismiss = this.onAISuggestionDismiss.bind(this);
 		this.sendUpdate	= this.sendUpdate.bind(this);
 	}
-	
+
 	getInitialState() {
 		return {
 			headlineText: "",
@@ -117,14 +127,17 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 			errors: [],
 			note: "",
 			selectedTags: new Set(),
-			extraHeightForTagAutocomplete: 0
+			extraHeightForTagAutocomplete: 0,
+			aiSuggestion: null
 		};
 	}
-	
+
 	componentDidMount() {
 		for (let evt of ['changeHeadline', 'makeReadOnly', 'updateProgress', 'addError']) {
 			this.addMessageListener(`progressWindowIframe.${evt}`, (data) => this[evt](...data));
 		}
+		this.addMessageListener('progressWindowIframe.aiPending', (data) => this.aiPending(data));
+		this.addMessageListener('progressWindowIframe.aiSuggestion', (data) => this.aiSuggestion(data));
 		this.addMessageListener('progressWindowIframe.shown', this.handleShown.bind(this));
 		this.addMessageListener('progressWindowIframe.hidden', this.handleHidden.bind(this));
 		this.addMessageListener('progressWindowIframe.reset', () => this.setState(this.getInitialState()));
@@ -827,6 +840,72 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 		});
 	}
 
+	//
+	// AI suggestion
+	//
+	aiPending() {
+		this.setState({ aiSuggestion: { status: 'pending' } });
+	}
+
+	aiSuggestion(data) {
+		let suggestion = data && data.suggestion;
+		if (!suggestion || suggestion.error) {
+			this.setState({ aiSuggestion: { status: 'error' } });
+			return;
+		}
+		let hasSuggestion = suggestion.collection || suggestion.newCollectionName
+			|| (suggestion.tags && suggestion.tags.length);
+		if (!hasSuggestion) {
+			this.setState({ aiSuggestion: null });
+			return;
+		}
+		this.setState({
+			aiSuggestion: {
+				status: 'ready',
+				data: suggestion,
+				applied: !!suggestion.autoApplied
+			}
+		});
+	}
+
+	/**
+	 * Apply the suggested target and tags by updating this component's state
+	 * and pushing them through the regular update flow
+	 */
+	onAISuggestionApply() {
+		let ai = this.state.aiSuggestion;
+		if (!ai || ai.status != 'ready' || ai.applied || !ai.data) return;
+		let data = ai.data;
+
+		let update = {};
+		if (data.collection && this.state.targets) {
+			let target = this.state.targets.find(row => row.id == data.collection.id);
+			if (target) {
+				update.target = target;
+				this.target = target;
+			}
+		}
+		if (data.tags && data.tags.length) {
+			let selectedTags = new Set(this.state.selectedTags);
+			for (let tag of data.tags) {
+				selectedTags.add(tag);
+			}
+			update.selectedTags = selectedTags;
+		}
+		if (!this.target && this.state.target) {
+			this.target = this.state.target;
+		}
+		this.setState(update, () => this.sendUpdate());
+		this.setState((prevState) => ({
+			aiSuggestion: Object.assign({}, prevState.aiSuggestion, { applied: true })
+		}));
+		this.handleUserInteraction();
+	}
+
+	onAISuggestionDismiss() {
+		this.setState({ aiSuggestion: null });
+	}
+
 	// Set extra height required for tags autocomplete to fit in the iframe
 	onTagAutocompleteShown(extraHeight) {
 		this.setState({ extraHeightForTagAutocomplete: extraHeight });
@@ -894,6 +973,81 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 		);
 	}
 	
+	/**
+	 * AI collection/tag suggestion row
+	 */
+	renderAISuggestion() {
+		let ai = this.state.aiSuggestion;
+		if (!ai) return "";
+
+		let contents = [];
+		let actions = null;
+		if (ai.status == 'pending') {
+			contents.push(
+				<span key="analyzing" className="ProgressWindow-aiAnalyzing">
+					<span className="ProgressWindow-aiSpinner" aria-hidden="true"/>
+					{this.text.aiAnalyzing}
+				</span>
+			);
+		}
+		else if (ai.status == 'error') {
+			contents.push(
+				<span key="error" className="ProgressWindow-aiError">{this.text.aiUnavailable}</span>
+			);
+			actions = (
+				<button className="ProgressWindow-aiDismiss" onClick={this.onAISuggestionDismiss}
+						aria-label={this.text.aiDismiss} title={this.text.aiDismiss}>×</button>
+			);
+		}
+		else if (ai.status == 'ready') {
+			let data = ai.data;
+			if (data.collection) {
+				contents.push(
+					<span key="collection" className="ProgressWindow-aiChip ProgressWindow-aiChipCollection">
+						<TargetIcon type={getTargetType(data.collection.id)}/>
+						{data.collection.name}
+					</span>
+				);
+			}
+			if (data.newCollectionName) {
+				contents.push(
+					<span key="newCollection" className="ProgressWindow-aiChip ProgressWindow-aiChipNew"
+							title={this.text.aiNewCollectionTooltip}>
+						{this.text.aiNewCollection.replace('$1', data.newCollectionName)}
+					</span>
+				);
+			}
+			for (let tag of data.tags || []) {
+				contents.push(
+					<span key={`tag-${tag}`} className="ProgressWindow-aiChip">{tag}</span>
+				);
+			}
+			if (ai.applied) {
+				actions = <span key="applied" className="ProgressWindow-aiApplied">{this.text.aiApplied}</span>;
+			}
+			else if (data.collection || (data.tags && data.tags.length)) {
+				actions = (
+					<React.Fragment>
+						<button key="apply" className="ProgressWindow-aiApply" onClick={this.onAISuggestionApply}>
+							{this.text.aiApply}
+						</button>
+						<button key="dismiss" className="ProgressWindow-aiDismiss" onClick={this.onAISuggestionDismiss}
+								aria-label={this.text.aiDismiss} title={this.text.aiDismiss}>×</button>
+					</React.Fragment>
+				);
+			}
+		}
+		return (
+			<div className="ProgressWindow-aiRow" title={ai.data && ai.data.reason || ""}>
+				<span className="ProgressWindow-aiLabel">{this.text.aiLabel}</span>
+				<div className="ProgressWindow-aiChips">
+					{contents}
+					{actions}
+				</div>
+			</div>
+		);
+	}
+
 	/**
 	 * Container for item progress lines
 	 */
@@ -1083,6 +1237,7 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 					onKeyPress={this.handleKeyPress}>
 				{this.renderHeadline()}
 				{this.renderTargetSelector()}
+				{this.renderAISuggestion()}
 				{this.renderProgress()}
 				{this.renderErrors()}
 			</div>

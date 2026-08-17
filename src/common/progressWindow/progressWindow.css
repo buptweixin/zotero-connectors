@@ -275,6 +275,122 @@ button:active {
 	margin-bottom: 4px;
 }
 
+/* ---------------------- AI suggestion row -------------------------- */
+
+.ProgressWindow-aiRow {
+	display: flex;
+	align-items: flex-start;
+	gap: 4px;
+	margin-top: 8px;
+	margin-bottom: 2px;
+	font-size: 12px;
+	line-height: 1.4em;
+}
+
+.ProgressWindow-aiLabel {
+	font-weight: bold;
+	font-size: 11px;
+	color: #7a56b8; /* hardcoded accent from light theme */
+	border: 1px solid #7a56b8;
+	border-radius: 3px;
+	padding: 0 3px;
+	margin-top: 1px;
+	user-select: none;
+	flex-shrink: 0;
+}
+
+.ProgressWindow-aiChips {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+}
+
+.ProgressWindow-aiChip {
+	display: inline-flex;
+	align-items: center;
+	background-color: #0000000d;
+	border-radius: 5px;
+	padding: 1px 4px 1px 4px;
+	max-width: 150px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	user-select: none;
+}
+
+.ProgressWindow-aiChipCollection {
+	max-width: 190px;
+}
+
+.ProgressWindow-aiChipCollection .ProgressWindow-targetIcon {
+	margin-left: 0;
+	margin-right: 2px;
+	vertical-align: -3px;
+	width: 13px;
+	height: 13px;
+}
+
+.ProgressWindow-aiChipNew {
+	font-style: italic;
+	cursor: help;
+}
+
+.ProgressWindow-aiAnalyzing {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	color: #666;
+}
+
+.ProgressWindow-aiSpinner {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border: 2px solid #c9c9c9;
+	border-top-color: #7a56b8;
+	border-radius: 50%;
+	animation: ProgressWindow-aiSpin 0.8s linear infinite;
+	flex-shrink: 0;
+}
+
+@keyframes ProgressWindow-aiSpin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.ProgressWindow-aiError {
+	color: #888;
+}
+
+.ProgressWindow-aiApply {
+	background-color: white;
+	border-radius: 4px;
+	font-size: 12px;
+	padding: 1px 8px;
+}
+
+.ProgressWindow-aiDismiss {
+	border: none;
+	background: url('x-6.svg') no-repeat center;
+	width: 14px;
+	height: 14px;
+	padding: 0;
+	border-radius: 3px;
+}
+
+.ProgressWindow-aiDismiss:hover {
+	background-color: #d5d5d5;
+	cursor: pointer;
+}
+
+.ProgressWindow-aiApplied {
+	color: #2c7a2c;
+	font-weight: bold;
+}
+
 
 /* ---------------------- tree.css -------------------------- */
 

@@ -485,6 +485,8 @@ let PageSaving = {
 					setTimeout(() => {
 						Zotero.Messaging.sendMessage("progressWindow.itemProgress", { ...progressItem, ...{ progress: 100 } });
 					}, 50);
+					// Metadata recognized from a PDF is a paper save too
+					triggerAIRecommendation(sessionID, [item]);
 				}
 			}
 

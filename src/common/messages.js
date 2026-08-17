@@ -310,6 +310,10 @@ var MESSAGES = {
 		handleImportableContent: true,
 		enable: false,
 		disable: false,
+	},
+	AIRecommender: {
+		recommend: true,
+		testConnection: true,
 	}
 };
 

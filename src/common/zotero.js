@@ -241,7 +241,7 @@ var Zotero = global.Zotero = new function() {
 		Zotero.Schema.init();
 		await this._initDateFormatsJSON();
 		Zotero.Prefs.loadNamespace(['translators.', 'downloadAssociatedFiles', 'automaticSnapshots', 'automaticTags',
-			'reportTranslationFailure', 'capitalizeTitles']);
+			'reportTranslationFailure', 'capitalizeTitles', 'ai.']);
 		await Zotero.Prefs.loadNamespace('debug');
 		
 		Zotero.Debug.init();
@@ -364,7 +364,15 @@ Zotero.Prefs = new function() {
 		
 		"integration.googleDocs.enabled": true,
 		"integration.googleDocs.useV2API": false,
-		
+
+		"ai.enabled": false,
+		"ai.provider": "openai", // "openai" (OpenAI-compatible) or "anthropic"
+		"ai.baseUrl": "",
+		"ai.apiKey": "",
+		"ai.model": "",
+		"ai.autoApply": false,
+		"ai.maxTags": 5,
+
 		"shortcuts.cite": {ctrlKey: true, altKey: true, key: 'c'}
 	};
 

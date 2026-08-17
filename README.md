@@ -2,6 +2,47 @@
 
 [![Build Status](https://travis-ci.org/zotero/zotero-connectors.svg?branch=master)](https://travis-ci.org/zotero/zotero-connectors)
 
+> **Fork note**: this fork adds **AI-powered collection & tag recommendations** on top of
+> the upstream Zotero Connectors. Everything below is the original documentation.
+
+## AI Recommendations (AI 智能推荐)
+
+When you save a paper, the connector can ask a configurable large language model to
+recommend a **collection (分组)** and **tags (标签)** based on the title and abstract:
+
+- Suggestions appear in the save progress popup as an "AI" row — click **Apply** to
+  move the item to the suggested collection and add the suggested tags
+  (or enable *Apply suggestions automatically* in the preferences)
+- Existing collections and tags are strongly preferred; if nothing fits, the model
+  proposes a new collection name. Since the Zotero connector API cannot create
+  collections, create it manually in Zotero once — future saves will pick it up
+- Works for both translator saves (arXiv, Google Scholar, …) and direct PDF saves
+  that Zotero recognizes
+- The model output is validated against your real collection list and sanitized
+  before anything is applied
+
+### Setup
+
+1. Open the extension's *Preferences → General → AI Recommendations*
+1. Enable it and configure the endpoint:
+   - **OpenAI-compatible** (OpenAI, DeepSeek, GLM, Kimi, Qwen, OpenRouter, local
+     Ollama, …): base URL like `https://api.openai.com/v1` or
+     `http://localhost:11434/v1` (API key optional for local endpoints)
+   - **Anthropic (Claude)**: base URL like `https://api.anthropic.com` plus API key
+1. Click **Test Connection** to verify
+
+Notes: requests go directly from your browser to the configured endpoint and the API
+key is stored in the extension's local storage. Multi-item saves and saves to
+zotero.org (when the Zotero client is offline) are skipped.
+
+### 安装使用（中文说明）
+
+1. 从 [Releases](https://github.com/buptweixin/zotero-connectors/releases) 下载 zip 并解压
+1. `chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选择解压出的目录
+1. 扩展设置 → General → AI Recommendations，启用并填写 LLM 接口（Base URL / API Key /
+   模型名），点 Test Connection 验证
+1. 保存论文时，进度窗口会出现 AI 建议的分组和标签，点 Apply 应用；也可在设置里开启自动应用
+
 ## Building
 
 1. `git clone https://github.com/zotero/zotero-connectors.git`

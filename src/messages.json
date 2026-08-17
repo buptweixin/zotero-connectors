@@ -127,6 +127,32 @@
 	"progressWindow_noteEditorPlaceholder": {
 		"message": "Add a note"
 	},
+	"progressWindow_ai_label": {
+		"message": "AI",
+		"description": "Badge labeling the AI suggestion row in the save popup"
+	},
+	"progressWindow_ai_analyzing": {
+		"message": "Analyzing collection & tags…"
+	},
+	"progressWindow_ai_apply": {
+		"message": "Apply"
+	},
+	"progressWindow_ai_applied": {
+		"message": "Applied ✓"
+	},
+	"progressWindow_ai_unavailable": {
+		"message": "AI suggestion unavailable"
+	},
+	"progressWindow_ai_newCollection": {
+		"message": "New collection: $1",
+		"description": "$1 is the name of the collection suggested to be created"
+	},
+	"progressWindow_ai_newCollectionTooltip": {
+		"message": "No existing collection seems to fit this paper. The Zotero connector API cannot create collections, so create it in Zotero if you want it; it will be picked up by future suggestions."
+	},
+	"progressWindow_ai_dismiss": {
+		"message": "Dismiss AI suggestion"
+	},
 	"progressWindow_error_translation": {
 		"message": "An error occurred while saving this item. See $1 for more information."
 	},

@@ -63,6 +63,9 @@ if (isTopWindow) {
 	var blurred = false;
 	var frameSrc;
 	var frameIsHidden = false;
+	// While an AI recommendation is pending, keep the popup open (capped)
+	var aiPendingUntil = 0;
+	var AI_HOLD_OPEN_MAX_MS = 20000;
 	frameSrc = Zotero.getExtensionURL('progressWindow/progressWindow.html');
 	var scrollX;
 	var scrollY;
@@ -178,6 +181,12 @@ if (isTopWindow) {
 	}
 	
 	function hideFrame() {
+		if (Date.now() < aiPendingUntil) {
+			// An AI recommendation is still pending; keep the popup visible so
+			// the suggestion can be shown, but keep retrying the close
+			startCloseTimer(Math.min(aiPendingUntil - Date.now(), 2000));
+			return;
+		}
 		insideIframe = false;
 		
 		var frame = zoteroFrame?.frame;
@@ -194,6 +203,7 @@ if (isTopWindow) {
 	
 	function resetFrame() {
 		stopCloseTimer();
+		aiPendingUntil = 0;
 		addEvent('reset');
 	}
 	
@@ -516,6 +526,19 @@ if (isTopWindow) {
 	Zotero.Messaging.addMessageListener("progressWindow.error", (args) => {
 		addError(args.shift(), ...args);
 	})
+
+	// AI collection/tag recommendation lifecycle, triggered from itemSaver
+	Zotero.Messaging.addMessageListener("progressWindow.aiPending", (data) => {
+		if (data.sessionID && data.sessionID != currentSessionID) return;
+		aiPendingUntil = Date.now() + AI_HOLD_OPEN_MAX_MS;
+		addEvent("aiPending", data);
+	});
+
+	Zotero.Messaging.addMessageListener("progressWindow.aiSuggestion", (data) => {
+		if (data.sessionID && data.sessionID != currentSessionID) return;
+		aiPendingUntil = 0;
+		addEvent("aiSuggestion", data);
+	});
 }
 
 })();

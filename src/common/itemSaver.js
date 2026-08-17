@@ -29,6 +29,43 @@ const PRIMARY_ATTACHMENT_TYPES = new Set([
 ]);
 
 /**
+ * Fire off an AI collection/tag recommendation for a saved item. The actual
+ * work happens in the background (Zotero.AIRecommender via messaging); the
+ * result is reported to the progress window. Never blocks or fails the save.
+ *
+ * @param {String} sessionID
+ * @param {Array} items - translated items (single-item saves only)
+ */
+async function triggerAIRecommendation(sessionID, items) {
+	let suggestion = { error: 'request-failed' };
+	try {
+		if (!await Zotero.Prefs.getAsync('ai.enabled')) return;
+		if (!items || items.length !== 1 || !items[0].title) return;
+		let item = items[0];
+		let meta = {
+			title: item.title,
+			abstractNote: item.abstractNote || '',
+			creators: (item.creators || []).slice(0, 3)
+				.map(c => c.lastName || c.name).filter(Boolean).join(', '),
+			publicationTitle: item.publicationTitle || item.publisher || '',
+			itemType: item.itemType,
+			url: item.url || ''
+		};
+		Zotero.Messaging.sendMessage("progressWindow.aiPending", { sessionID });
+		suggestion = await Zotero.AIRecommender.recommend({ sessionID, item: meta });
+	}
+	catch (e) {
+		Zotero.debug(`AI recommendation failed: ${e.message || e}`);
+	}
+	try {
+		Zotero.Messaging.sendMessage("progressWindow.aiSuggestion", { sessionID, suggestion });
+	}
+	catch (e) {
+		Zotero.debug(`AI recommendation reporting failed: ${e.message || e}`);
+	}
+}
+
+/**
  * Save translated items in JSON format
  *
  * @constructor
@@ -185,6 +222,7 @@ ItemSaver.prototype = {
 
 		Zotero.debug("Translate: Save via Zotero succeeded");
 		Zotero.Messaging.sendMessage("progressWindow.sessionCreated", { sessionID: this._sessionID });
+		triggerAIRecommendation(this._sessionID, items);
 		
 		const response = await Zotero.Connector.callMethod("getSelectedCollection", {})
 		if (response.filesEditable) {

@@ -80,6 +80,7 @@ var Zotero_Preferences = {
 		
 		Zotero_Preferences.General.init();
 		Zotero_Preferences.Advanced.init();
+		Zotero_Preferences.AI.init();
 
 		Zotero.Prefs.loadNamespace('proxies').then(function() {
 			Zotero_Preferences.Proxies.init();
@@ -199,6 +200,46 @@ Zotero_Preferences.General = {
 	 */
 	openTranslatorTester: function() {
 		window.open(Zotero.getExtensionURL("tools/testTranslators/testTranslators.html"), "translatorTester");
+	}
+};
+
+Zotero_Preferences.AI = {
+	init: async function() {
+		await Zotero.Prefs.loadNamespace('ai');
+		await this.bindPref('ai-provider', 'ai.provider');
+		await this.bindPref('ai-base-url', 'ai.baseUrl', v => v.trim());
+		await this.bindPref('ai-api-key', 'ai.apiKey', v => v.trim());
+		await this.bindPref('ai-model', 'ai.model', v => v.trim());
+		await this.bindPref('ai-max-tags', 'ai.maxTags', v => Math.min(Math.max(parseInt(v) || 5, 1), 10));
+
+		let button = document.getElementById('ai-button-test-connection');
+		let status = document.getElementById('ai-span-test-connection-status');
+		button.onclick = async function() {
+			status.style.color = '';
+			status.textContent = 'Testing…';
+			button.disabled = true;
+			try {
+				let res = await Zotero.AIRecommender.testConnection();
+				status.style.color = res.ok ? 'green' : 'red';
+				status.textContent = res.ok ? 'OK' : `Failed: ${res.message}`;
+			}
+			catch (e) {
+				status.style.color = 'red';
+				status.textContent = `Failed: ${e.message}`;
+			}
+			button.disabled = false;
+		};
+	},
+
+	/**
+	 * Load a pref into a form field and store changes back
+	 */
+	bindPref: async function(nodeId, pref, transform = v => v) {
+		let node = document.getElementById(nodeId);
+		node.value = await Zotero.Prefs.getAsync(pref);
+		node.addEventListener('change', function() {
+			Zotero.Prefs.set(pref, transform(node.value));
+		});
 	}
 };
 

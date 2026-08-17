@@ -61,6 +61,39 @@
 					</div>
 				</div>
 			</div>
+			<div class="group">
+				<div class="group-title">AI Recommendations</div>
+				<div class="group-content">
+					<p>
+						<label><input type="checkbox" data-pref="ai.enabled"/>&nbsp;Suggest a collection and tags for saved papers using a large language model</label>
+					</p>
+					<div id="ai-config">
+						<p>
+							<label>Provider
+								<select id="ai-provider">
+									<option value="openai">OpenAI-compatible (OpenAI, DeepSeek, GLM, Kimi, Ollama, …)</option>
+									<option value="anthropic">Anthropic (Claude)</option>
+								</select>
+							</label>
+						</p>
+						<p><label>Base URL<br/><input type="text" id="ai-base-url" placeholder="e.g. https://api.openai.com/v1" style="width: 340px"/></label></p>
+						<p><label>API Key<br/><input type="password" id="ai-api-key" placeholder="sk-…" autocomplete="off" style="width: 340px"/></label></p>
+						<p><label>Model<br/><input type="text" id="ai-model" placeholder="e.g. gpt-4o-mini, deepseek-chat, glm-4.6, claude-sonnet-4-5" style="width: 340px"/></label></p>
+						<p>
+							<label><input type="checkbox" data-pref="ai.autoApply"/>&nbsp;Apply suggestions automatically (overrides tags typed in the save popup)</label>
+						</p>
+						<p>
+							<label>Max tags <input type="number" id="ai-max-tags" min="1" max="10" style="width: 3em"/></label>
+							<input type="button" value="Test Connection" id="ai-button-test-connection"/>
+							<span id="ai-span-test-connection-status"></span>
+						</p>
+						<p style="color: gray; font-size: 12px;">
+							Requests go directly from your browser to the configured endpoint.
+							The API key is stored in this extension's local storage.
+						</p>
+					</div>
+				</div>
+			</div>
 			<div class="group" style="display: none" id="intercept-and-import">
 				<div class="group-title">Automatic File Importing</div>
 				<!-- React Component -->

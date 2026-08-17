@@ -37,6 +37,11 @@ Notes: requests go directly from your browser to the configured endpoint and the
 key is stored in the extension's local storage. Multi-item saves and saves to
 zotero.org (when the Zotero client is offline) are skipped.
 
+## Community
+
+This project is shared with and supported by the
+[LINUX DO](https://linux.do) community. Thanks for all the feedback and ideas.
+
 ## Building
 
 1. `git clone https://github.com/zotero/zotero-connectors.git`

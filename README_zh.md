@@ -185,3 +185,7 @@ monkey-patch：调用是异步的，如需返回值，通过调用最后一个�
 
 如果你对开发 Zotero Connectors 有任何疑问，可以加入
 [zotero-dev 邮件列表](https://groups.google.com/forum/#!forum/zotero-dev) 参与讨论。
+
+## 社区
+
+本项目分享自 [LINUX DO](https://linux.do) 社区，感谢社区佬友的支持与反馈。

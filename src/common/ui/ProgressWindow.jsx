@@ -74,6 +74,12 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 			aiApply: Zotero.getString('progressWindow_ai_apply'),
 			aiApplied: Zotero.getString('progressWindow_ai_applied'),
 			aiUnavailable: Zotero.getString('progressWindow_ai_unavailable'),
+			aiNoSuggestion: Zotero.getString('progressWindow_ai_noSuggestion'),
+			aiGenerate: Zotero.getString('progressWindow_ai_generate'),
+			aiRetry: Zotero.getString('progressWindow_ai_retry'),
+			aiRegenerate: Zotero.getString('progressWindow_ai_regenerate'),
+			confirmSaveSave: Zotero.getString('progressWindow_confirmSave_save'),
+			confirmSaveCancel: Zotero.getString('progressWindow_confirmSave_cancel'),
 			aiNewCollection: Zotero.getString('progressWindow_ai_newCollection'),
 			aiNewCollectionTooltip: Zotero.getString('progressWindow_ai_newCollectionTooltip'),
 			aiDismiss: Zotero.getString('progressWindow_ai_dismiss')
@@ -114,6 +120,9 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 		this.onTagAutocompleteShown = this.onTagAutocompleteShown.bind(this);
 		this.onAISuggestionApply = this.onAISuggestionApply.bind(this);
 		this.onAISuggestionDismiss = this.onAISuggestionDismiss.bind(this);
+		this.onAISuggestionRetry = this.onAISuggestionRetry.bind(this);
+		this.onConfirmSave = this.onConfirmSave.bind(this);
+		this.onCancelSave = this.onCancelSave.bind(this);
 		this.sendUpdate	= this.sendUpdate.bind(this);
 	}
 
@@ -128,7 +137,8 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 			note: "",
 			selectedTags: new Set(),
 			extraHeightForTagAutocomplete: 0,
-			aiSuggestion: null
+			aiSuggestion: null,
+			saveConfirmation: null
 		};
 	}
 
@@ -138,6 +148,8 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 		}
 		this.addMessageListener('progressWindowIframe.aiPending', (data) => this.aiPending(data));
 		this.addMessageListener('progressWindowIframe.aiSuggestion', (data) => this.aiSuggestion(data));
+		this.addMessageListener('progressWindowIframe.confirmSave', (data) => this.confirmSaveRequested(data));
+		this.addMessageListener('progressWindowIframe.confirmSaveDone', () => this.confirmSaveFinished());
 		this.addMessageListener('progressWindowIframe.shown', this.handleShown.bind(this));
 		this.addMessageListener('progressWindowIframe.hidden', this.handleHidden.bind(this));
 		this.addMessageListener('progressWindowIframe.reset', () => this.setState(this.getInitialState()));
@@ -850,13 +862,17 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 	aiSuggestion(data) {
 		let suggestion = data && data.suggestion;
 		if (!suggestion || suggestion.error) {
-			this.setState({ aiSuggestion: { status: 'error' } });
+			this.setState({
+				aiSuggestion: { status: 'error', message: suggestion && suggestion.message || '' }
+			});
 			return;
 		}
 		let hasSuggestion = suggestion.collection || suggestion.newCollectionName
 			|| (suggestion.tags && suggestion.tags.length);
 		if (!hasSuggestion) {
-			this.setState({ aiSuggestion: null });
+			// No suggestion this time, but keep the row visible with a
+			// "Generate" button so the user can manually retry.
+			this.setState({ aiSuggestion: { status: 'idle' } });
 			return;
 		}
 		this.setState({
@@ -895,10 +911,8 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 		if (!this.target && this.state.target) {
 			this.target = this.state.target;
 		}
+		update.aiSuggestion = Object.assign({}, this.state.aiSuggestion, { applied: true });
 		this.setState(update, () => this.sendUpdate());
-		this.setState((prevState) => ({
-			aiSuggestion: Object.assign({}, prevState.aiSuggestion, { applied: true })
-		}));
 		this.handleUserInteraction();
 	}
 
@@ -906,9 +920,80 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 		this.setState({ aiSuggestion: null });
 	}
 
+	/**
+	 * Manually (re-)trigger the AI collection/tag recommendation. The row
+	 * flips to pending while the request runs; itemSaver.js keeps the cached
+	 * item metadata for this session so the page isn't re-translated.
+	 */
+	onAISuggestionRetry() {
+		this.sendMessage('retryAI');
+		this.setState({ aiSuggestion: { status: 'pending' } });
+		this.handleUserInteraction();
+	}
+
 	// Set extra height required for tags autocomplete to fit in the iframe
 	onTagAutocompleteShown(extraHeight) {
 		this.setState({ extraHeightForTagAutocomplete: extraHeight });
+	}
+
+	//
+	// Held-save confirmation (save.confirmBeforeSave)
+	//
+	confirmSaveRequested(data) {
+		// Don't let the popup auto-close while the save is on hold
+		this.sendMessage('disableCloseTimer');
+		this.setState({ saveConfirmation: data });
+	}
+
+	confirmSaveFinished() {
+		this.sendMessage('enableCloseTimer');
+		this.setState({ saveConfirmation: null });
+	}
+
+	onConfirmSave() {
+		this.confirmSaveFinished();
+		this.sendMessage('confirmSaveDecision', true);
+		this.handleUserInteraction();
+	}
+
+	onCancelSave() {
+		this.confirmSaveFinished();
+		this.sendMessage('confirmSaveDecision', false);
+		this.handleUserInteraction();
+	}
+
+	/**
+	 * Confirmation bar shown while a save is on hold: the item(s) are not in
+	 * Zotero yet and only get saved when the user clicks "Save"
+	 */
+	renderSaveConfirmation() {
+		let confirmation = this.state.saveConfirmation;
+		if (!confirmation) return "";
+		let items = confirmation.items || [];
+		let titles = items.slice(0, 3).map(item => item.title).filter(Boolean);
+		let extraCount = items.length - titles.length;
+		return (
+			<div className="ProgressWindow-confirmRow" role="alertdialog"
+					aria-label={Zotero.getString('progressWindow_confirmSave_title', items.length)}>
+				<div className="ProgressWindow-confirmTitle">
+					{Zotero.getString('progressWindow_confirmSave_title', items.length)}
+				</div>
+				{titles.map((title, index) => (
+					<div key={index} className="ProgressWindow-confirmItem">{title}</div>
+				))}
+				{extraCount > 0 && (
+					<div className="ProgressWindow-confirmItem ProgressWindow-confirmMore">+{extraCount}</div>
+				)}
+				<div className="ProgressWindow-confirmActions">
+					<button className="ProgressWindow-confirmCancel" onClick={this.onCancelSave}>
+						{this.text.confirmSaveCancel}
+					</button>
+					<button className="ProgressWindow-confirmSave" onClick={this.onConfirmSave}>
+						{this.text.confirmSaveSave}
+					</button>
+				</div>
+			</div>
+		);
 	}
 
 	renderTargetSelector() {
@@ -992,11 +1077,33 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 		}
 		else if (ai.status == 'error') {
 			contents.push(
-				<span key="error" className="ProgressWindow-aiError">{this.text.aiUnavailable}</span>
+				<span key="error" className="ProgressWindow-aiError"
+						title={ai.message || ''}>{this.text.aiUnavailable}</span>
 			);
 			actions = (
-				<button className="ProgressWindow-aiDismiss" onClick={this.onAISuggestionDismiss}
-						aria-label={this.text.aiDismiss} title={this.text.aiDismiss}>×</button>
+				<React.Fragment>
+					<button key="retry" className="ProgressWindow-aiRetry"
+							onClick={this.onAISuggestionRetry}>{this.text.aiRetry}</button>
+					<button key="dismiss" className="ProgressWindow-aiDismiss"
+							onClick={this.onAISuggestionDismiss}
+							aria-label={this.text.aiDismiss} title={this.text.aiDismiss}>×</button>
+				</React.Fragment>
+			);
+		}
+		else if (ai.status == 'idle') {
+			// A request ran but produced no suggestion (or never ran). Offer a
+			// manual trigger so the user can generate one on demand.
+			contents.push(
+				<span key="idle" className="ProgressWindow-aiIdle">{this.text.aiNoSuggestion}</span>
+			);
+			actions = (
+				<React.Fragment>
+					<button key="generate" className="ProgressWindow-aiRetry"
+							onClick={this.onAISuggestionRetry}>{this.text.aiGenerate}</button>
+					<button key="dismiss" className="ProgressWindow-aiDismiss"
+							onClick={this.onAISuggestionDismiss}
+							aria-label={this.text.aiDismiss} title={this.text.aiDismiss}>×</button>
+				</React.Fragment>
 			);
 		}
 		else if (ai.status == 'ready') {
@@ -1022,12 +1129,25 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 					<span key={`tag-${tag}`} className="ProgressWindow-aiChip">{tag}</span>
 				);
 			}
+			// Manual re-trigger, available in every settled state so the user
+			// can always regenerate a suggestion (or replace one they dislike)
+			let regenerate = (
+				<button key="regenerate" className="ProgressWindow-aiRetry ProgressWindow-aiRegenerate"
+						onClick={this.onAISuggestionRetry}
+						aria-label={this.text.aiRegenerate} title={this.text.aiRegenerate}>↻</button>
+			);
 			if (ai.applied) {
-				actions = <span key="applied" className="ProgressWindow-aiApplied">{this.text.aiApplied}</span>;
+				actions = (
+					<React.Fragment>
+						<span key="applied" className="ProgressWindow-aiApplied">{this.text.aiApplied}</span>
+						{regenerate}
+					</React.Fragment>
+				);
 			}
 			else if (data.collection || (data.tags && data.tags.length)) {
 				actions = (
 					<React.Fragment>
+						{regenerate}
 						<button key="apply" className="ProgressWindow-aiApply" onClick={this.onAISuggestionApply}>
 							{this.text.aiApply}
 						</button>
@@ -1038,7 +1158,8 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 			}
 		}
 		return (
-			<div className="ProgressWindow-aiRow" title={ai.data && ai.data.reason || ""}>
+			<div className="ProgressWindow-aiRow" role="status" aria-live="polite"
+					title={ai.data && ai.data.reason || ai.message || ""}>
 				<span className="ProgressWindow-aiLabel">{this.text.aiLabel}</span>
 				<div className="ProgressWindow-aiChips">
 					{contents}
@@ -1201,6 +1322,12 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 			};
 			contents = <span dangerouslySetInnerHTML={html}/>;
 		}
+		else if (err === "skippedDuplicate") {
+			contents = <span>{Zotero.getString('progressWindow_skippedDuplicate', args[0])}</span>;
+		}
+		else if (err === "saveCancelled") {
+			contents = <span>{Zotero.getString('progressWindow_saveCancelled')}</span>;
+		}
 		else if (err === "siteAccessLimits") {
 			const translator = `<b>${args[0]}</b>`;
 			const siteAccessURL = "https://www.zotero.org/support/kb/site_access_limits";
@@ -1236,6 +1363,7 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 					onKeyDown={this.handleKeyDown}
 					onKeyPress={this.handleKeyPress}>
 				{this.renderHeadline()}
+				{this.renderSaveConfirmation()}
 				{this.renderTargetSelector()}
 				{this.renderAISuggestion()}
 				{this.renderProgress()}

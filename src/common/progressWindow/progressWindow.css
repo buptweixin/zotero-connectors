@@ -365,6 +365,30 @@ button:active {
 	color: #888;
 }
 
+.ProgressWindow-aiIdle {
+	color: #888;
+}
+
+/* Manual "Generate" / "Retry" trigger button */
+.ProgressWindow-aiRetry {
+	background-color: white;
+	border: 1px solid #7a56b8;
+	color: #7a56b8;
+	border-radius: 4px;
+	font-size: 12px;
+	padding: 0 8px;
+	cursor: pointer;
+}
+
+.ProgressWindow-aiRetry:hover {
+	background-color: #f3eefb;
+}
+
+/* Compact icon-only variant used to regenerate an existing suggestion */
+.ProgressWindow-aiRegenerate {
+	padding: 0 6px;
+}
+
 .ProgressWindow-aiApply {
 	background-color: white;
 	border-radius: 4px;
@@ -488,3 +512,66 @@ html[dir="rtl"] .arrow svg,
 	margin-left: 4px;
 }
 
+
+/* Held-save confirmation bar (save.confirmBeforeSave) */
+.ProgressWindow-confirmRow {
+	border: 1px solid #7a56b8;
+	border-radius: 4px;
+	padding: 8px;
+	margin: 8px 0;
+	background-color: #f8f5fd;
+}
+
+.ProgressWindow-confirmTitle {
+	font-weight: bold;
+	margin-bottom: 4px;
+}
+
+.ProgressWindow-confirmItem {
+	color: #444;
+	font-size: 11px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	margin-bottom: 1px;
+}
+
+.ProgressWindow-confirmMore {
+	color: #888;
+}
+
+.ProgressWindow-confirmActions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 6px;
+	margin-top: 8px;
+}
+
+.ProgressWindow-confirmSave {
+	background-color: #7a56b8;
+	color: white;
+	border: none;
+	border-radius: 4px;
+	font-size: 12px;
+	padding: 3px 14px;
+	cursor: pointer;
+	font-weight: bold;
+}
+
+.ProgressWindow-confirmSave:hover {
+	background-color: #69449e;
+}
+
+.ProgressWindow-confirmCancel {
+	background-color: white;
+	color: #666;
+	border: 1px solid #bbb;
+	border-radius: 4px;
+	font-size: 12px;
+	padding: 3px 12px;
+	cursor: pointer;
+}
+
+.ProgressWindow-confirmCancel:hover {
+	background-color: #f2f2f2;
+}

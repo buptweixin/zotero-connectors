@@ -186,6 +186,13 @@ export async function mochaGlobalSetup() {
 	await worker.evaluate(() => Zotero.initDeferred.promise);
 	await seedTranslatorPrefs(worker);
 
+	// Disable interactive save flows that would otherwise hold every E2E save
+	// waiting for user input in the progress window
+	await worker.evaluate(async () => {
+		await Zotero.Prefs.set('save.confirmBeforeSave', false);
+		await Zotero.Prefs.set('duplicateChecker.enabled', false);
+	});
+
 	const workerURL = workerTarget.url();
 	globalThis.extensionURL = workerURL.substring(0, workerURL.indexOf('background-worker.js'));
 

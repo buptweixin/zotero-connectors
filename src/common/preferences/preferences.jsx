@@ -212,6 +212,13 @@ Zotero_Preferences.AI = {
 		await this.bindPref('ai-model', 'ai.model', v => v.trim());
 		await this.bindPref('ai-max-tags', 'ai.maxTags', v => Math.min(Math.max(parseInt(v) || 5, 1), 10));
 
+		// Dim and disable the config fields while the feature is off
+		let enabledCheckbox = document.querySelector('[data-pref="ai.enabled"]');
+		let configFieldset = document.getElementById('ai-config');
+		let syncConfigState = () => configFieldset.disabled = !enabledCheckbox.checked;
+		enabledCheckbox.addEventListener('change', syncConfigState);
+		syncConfigState();
+
 		let button = document.getElementById('ai-button-test-connection');
 		let status = document.getElementById('ai-span-test-connection-status');
 		button.onclick = async function() {

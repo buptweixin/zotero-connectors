@@ -21,7 +21,7 @@
     ***** END LICENSE BLOCK *****
 */
 
-import { background } from '../support/utils.mjs';
+import { background, stubConnectorCallMethod } from '../support/utils.mjs';
 
 describe("AIRecommender", function() {
 	describe('#parseJSONResponse()', function() {
@@ -111,11 +111,45 @@ describe("AIRecommender", function() {
 			if (tags.length != 3) {
 				throw new Error(`Expected 3 tags, got ${tags.length}: ${JSON.stringify(tags)}`);
 			}
-			if (tags[0] != 'LLM' || tags[1] != 'RAG') {
+			if (tags[0] != '#LLM' || tags[1] != '#RAG') {
 				throw new Error(`Unexpected tags: ${JSON.stringify(tags)}`);
 			}
 			if (tags.some(t => typeof t != 'string' || t.length > 64)) {
 				throw new Error(`Unexpected tags: ${JSON.stringify(tags)}`);
+			}
+		});
+
+		it('reuses existing library tags verbatim and prefixes new tags with #', async function() {
+			let suggestion = await background((targets, parsed, existingEntries) => {
+				let existingTags = Zotero.AIRecommender._internals.buildExistingTagsMap(existingEntries);
+				return Zotero.AIRecommender._internals.validateSuggestion(parsed, targets, { maxTags: 5 }, existingTags);
+			}, TARGETS, {
+				tags: ['llm', 'LLM', 'machine Learning', 'rl', 'transformers']
+			}, [
+				{ tag: 'LLM' },
+				{ tag: 'Machine Learning' },
+				{ tag: '#RL' }
+			]);
+			let tags = suggestion.tags;
+			// 'LLM'/'llm' collapse onto the library spelling, 'rl' reuses the
+			// existing '#RL' across the '#' boundary, 'transformers' is new
+			if (JSON.stringify(tags) != JSON.stringify(['LLM', 'Machine Learning', '#RL', '#transformers'])) {
+				throw new Error(`Unexpected tags: ${JSON.stringify(tags)}`);
+			}
+		});
+
+		it('buildExistingTagsMap keys ignore case and a leading #', async function() {
+			let map = await background((libraryTags) => {
+				return Array.from(Zotero.AIRecommender._internals.buildExistingTagsMap(libraryTags));
+			}, [{ tag: 'LLM' }, { tag: '  Reinforcement Learning ' }, 'weird', { tag: '#RL' }, { tag: '' }]);
+			let keys = map.map(([k]) => k);
+			if (map.length != 4
+					|| !keys.includes('llm') || !keys.includes('reinforcement learning')
+					|| !keys.includes('rl') || !keys.includes('weird')) {
+				throw new Error(`Unexpected map: ${JSON.stringify(map)}`);
+			}
+			if (!map.some(([k, v]) => k == 'rl' && v == '#RL')) {
+				throw new Error(`'#RL' should map back to its exact spelling: ${JSON.stringify(map)}`);
 			}
 		});
 
@@ -208,6 +242,9 @@ describe("AIRecommender", function() {
 			}
 			if (!prompt.system.includes('2 and 4')) {
 				throw new Error('System prompt should cap tags at maxTags');
+			}
+			if (!prompt.system.includes('"#"') || !prompt.system.includes('#RL')) {
+				throw new Error('System prompt should require new tags to start with "#"');
 			}
 		});
 	});
@@ -303,6 +340,65 @@ describe("AIRecommender", function() {
 			});
 			if (result.error != 'not-configured') {
 				throw new Error(`Expected not-configured: ${JSON.stringify(result)}`);
+			}
+		});
+
+		it('shares one in-flight request between concurrent calls for the same session', async function() {
+			let restoreCallMethod = await stubConnectorCallMethod({
+				getSelectedCollection: {
+					response: {
+						libraryID: 1,
+						targets: [
+							{ id: 'L1', name: 'My Library', level: 0 },
+							{ id: 'C1', name: 'ML', level: 1 }
+						],
+						tags: {}
+					}
+				}
+			});
+			try {
+				let result = await background(async () => {
+					await Zotero.Prefs.set('ai.enabled', true);
+					await Zotero.Prefs.set('ai.provider', 'openai');
+					await Zotero.Prefs.set('ai.baseUrl', 'https://api.example.com/v1');
+					await Zotero.Prefs.set('ai.model', 'test-model');
+					let origCallLLM = Zotero.AIRecommender._callLLM;
+					let llmCalls = 0;
+					Zotero.AIRecommender._callLLM = async function() {
+						llmCalls++;
+						await new Promise(resolve => setTimeout(resolve, 100));
+						return '{"collectionId": "C1", "tags": ["llm"], "reason": "matched collection"}';
+					};
+					try {
+						let [first, second] = await Promise.all([
+							Zotero.AIRecommender.recommend({
+								sessionID: 'test-concurrent', item: { title: 'A Paper' }
+							}),
+							Zotero.AIRecommender.recommend({
+								sessionID: 'test-concurrent', item: { title: 'A Paper' }
+							})
+						]);
+						return { llmCalls, identical: first === second, first };
+					}
+					finally {
+						Zotero.AIRecommender._callLLM = origCallLLM;
+						await Zotero.Prefs.set('ai.enabled', false);
+						await Zotero.Prefs.set('ai.baseUrl', '');
+						await Zotero.Prefs.set('ai.model', '');
+					}
+				});
+				if (result.llmCalls != 1) {
+					throw new Error(`Expected a single LLM call, got ${result.llmCalls}`);
+				}
+				if (!result.identical) {
+					throw new Error('Concurrent callers should receive the same suggestion object');
+				}
+				if (result.first.error || !result.first.collection || result.first.collection.id != 'C1') {
+					throw new Error(`Unexpected suggestion: ${JSON.stringify(result.first)}`);
+				}
+			}
+			finally {
+				await restoreCallMethod();
 			}
 		});
 	});

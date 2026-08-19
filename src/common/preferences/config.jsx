@@ -23,6 +23,11 @@
 	***** END LICENSE BLOCK *****
 */
 
+// Keep in sync with SENSITIVE_PREF_NAMES in src/browserExt/prefs.js.
+// Masks secret values (e.g. the AI provider API key) in the config table;
+// editing a row still prompts with the real value.
+const SENSITIVE_PREF_NAMES = /(?:api.?key|secret|token|password)/i;
+
 var Zotero_Preferences_Config = {
 	init: async function() {
 		Zotero.Messaging.init();
@@ -156,10 +161,12 @@ Zotero_Preferences_Config.Row = class Row extends React.Component {
 			defaultValue = JSON.stringify(defaultValue);
 		}
 		const isNotDefault = this.state.value != defaultValue;
+		const isSensitive = SENSITIVE_PREF_NAMES.test(this.props.name)
+			&& typeof this.state.value == 'string' && this.state.value.length;
 		return (
 			<tr onDoubleClick={this.edit} data-name={this.props.name} className="config-row">
 				<td>{this.props.name}</td>
-				<td className={isNotDefault ? 'is-not-default' : ''}>{this.state.value}</td>
+				<td className={isNotDefault ? 'is-not-default' : ''}>{isSensitive ? '••••••••' : this.state.value}</td>
 				<td><a href="javascript:void(0);" onClick={this.props.reset}>Reset</a></td>
 			</tr>
 		)

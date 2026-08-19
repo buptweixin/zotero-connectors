@@ -29,34 +29,118 @@ const PRIMARY_ATTACHMENT_TYPES = new Set([
 ]);
 
 /**
- * Fire off an AI collection/tag recommendation for a saved item. The actual
- * work happens in the background (Zotero.AIRecommender via messaging); the
- * result is reported to the progress window. Never blocks or fails the save.
- *
- * @param {String} sessionID
- * @param {Array} items - translated items (single-item saves only)
+ * Per-session item metadata captured when an item is saved, so the AI
+ * recommendation can be re-run on demand (the progress window's
+ * "Generate"/"Retry" button) without re-translating the page. Bounded so a
+ * long-lived page saving many items doesn't accumulate abstracts.
  */
-async function triggerAIRecommendation(sessionID, items) {
+const _aiSessionMeta = new Map();
+const AI_META_CACHE_SIZE = 5;
+
+function rememberAIItemMeta(sessionID, meta) {
+	_aiSessionMeta.set(sessionID, meta);
+	while (_aiSessionMeta.size > AI_META_CACHE_SIZE) {
+		_aiSessionMeta.delete(_aiSessionMeta.keys().next().value);
+	}
+}
+
+/**
+ * Build the compact metadata payload sent to the AI recommender from a
+ * translated item.
+ */
+function buildItemMeta(item) {
+	return {
+		title: item.title,
+		abstractNote: item.abstractNote || '',
+		creators: (item.creators || []).slice(0, 3)
+			.map(c => c.lastName || c.name).filter(Boolean).join(', '),
+		publicationTitle: item.publicationTitle || item.publisher || '',
+		itemType: item.itemType,
+		url: item.url || ''
+	};
+}
+
+/**
+ * Request a recommendation for the given session/meta pair and report the
+ * result to the progress window. Shared by the automatic and manual paths.
+ */
+async function runAIRecommendation(sessionID, meta) {
 	let suggestion = { error: 'request-failed' };
 	try {
-		if (!await Zotero.Prefs.getAsync('ai.enabled')) return;
-		if (!items || items.length !== 1 || !items[0].title) return;
-		let item = items[0];
-		let meta = {
-			title: item.title,
-			abstractNote: item.abstractNote || '',
-			creators: (item.creators || []).slice(0, 3)
-				.map(c => c.lastName || c.name).filter(Boolean).join(', '),
-			publicationTitle: item.publicationTitle || item.publisher || '',
-			itemType: item.itemType,
-			url: item.url || ''
-		};
 		Zotero.Messaging.sendMessage("progressWindow.aiPending", { sessionID });
 		suggestion = await Zotero.AIRecommender.recommend({ sessionID, item: meta });
 	}
 	catch (e) {
 		Zotero.debug(`AI recommendation failed: ${e.message || e}`);
 	}
+	try {
+		Zotero.Messaging.sendMessage("progressWindow.aiSuggestion", { sessionID, suggestion });
+	}
+	catch (e) {
+		Zotero.debug(`AI recommendation reporting failed: ${e.message || e}`);
+	}
+}
+
+/**
+ * Fire off an AI collection/tag recommendation for a saved item. The actual
+ * work happens in the background (Zotero.AIRecommender via messaging); the
+ * result is reported to the progress window. Never blocks or fails the save.
+ *
+ * The item metadata is cached per session so the recommendation can be
+ * re-triggered manually from the progress window when the automatic run did
+ * not fire or did not produce a suggestion.
+ *
+ * @param {String} sessionID
+ * @param {Array} items - translated items (single-item saves only)
+ */
+async function triggerAIRecommendation(sessionID, items) {
+	if (!await Zotero.Prefs.getAsync('ai.enabled')) return;
+	if (!items || items.length !== 1) return;
+	let item = items[0];
+	if (!item.title) return;
+	let meta = buildItemMeta(item);
+	// Cache the metadata even when the automatic run is skipped below, so the
+	// progress window's "Generate" button can still trigger a recommendation
+	// for this session
+	rememberAIItemMeta(sessionID, meta);
+	if (item.itemType == 'webpage') {
+		// The automatic run targets papers (a title-only prompt is rarely
+		// useful); reporting an empty suggestion keeps the AI row visible so
+		// the user can generate one manually
+		reportAISuggestion(sessionID, {});
+		return;
+	}
+	await runAIRecommendation(sessionID, meta);
+}
+
+/**
+ * Manually re-trigger the AI recommendation for an already-saved session.
+ * Called from the progress window's "Generate"/"Retry" button. When the
+ * feature is disabled or no metadata was captured for this session, an
+ * explicit error suggestion is reported so the progress window doesn't get
+ * stuck in its pending state.
+ *
+ * @param {String} sessionID
+ */
+async function retryAIRecommendation(sessionID) {
+	if (!await Zotero.Prefs.getAsync('ai.enabled')) {
+		reportAISuggestion(sessionID, { error: 'not-configured' });
+		return;
+	}
+	let meta = _aiSessionMeta.get(sessionID);
+	if (!meta) {
+		reportAISuggestion(sessionID, { error: 'no-metadata' });
+		return;
+	}
+	await runAIRecommendation(sessionID, meta);
+}
+
+/**
+ * Send an AI suggestion result to the progress window without actually
+ * contacting the model. Used to bail out of the pending state when a manual
+ * retry can't proceed (disabled, no session metadata, etc.).
+ */
+function reportAISuggestion(sessionID, suggestion) {
 	try {
 		Zotero.Messaging.sendMessage("progressWindow.aiSuggestion", { sessionID, suggestion });
 	}
@@ -129,6 +213,9 @@ ItemSaver.prototype = {
 	 */
 	saveItems: async function (items, attachmentCallback, itemsDoneCallback=()=>0) {
 		Zotero.debug(`ItemSaver.saveItems: Saving ${items.length} items`);
+		if (await this._checkDuplicates(items)) {
+			return items;
+		}
 		try {
 			return await this._saveToZotero(items, attachmentCallback, itemsDoneCallback);
 		}
@@ -139,9 +226,64 @@ ItemSaver.prototype = {
   			throw e;
 		}
 	},
+
+	/**
+	 * When any item about to be saved was already saved through this
+	 * connector before, ask whether to import anyway. Returns true when the
+	 * save should be skipped. Fails open (never blocks the save on errors).
+	 *
+	 * @param {Object[]} items
+	 * @returns {Promise<Boolean>} true = skip the save
+	 */
+	_checkDuplicates: async function(items) {
+		try {
+			if (!await Zotero.Prefs.getAsync('duplicateChecker.enabled')) return false;
+			if (!items || !items.some(item => item.itemType != 'webpage')) return false;
+			let { duplicates } = await Zotero.DuplicateChecker.check(items);
+			if (!duplicates || !duplicates.length) return false;
+
+			let names = duplicates.slice(0, 3).map(d => `&bull; ${d.title}`).join('<br/>');
+			if (duplicates.length > 3) names += '<br/>&bull; &hellip;';
+			let result = await Zotero.ModalPrompt.confirm({
+				title: Zotero.getString('duplicatePrompt_title'),
+				message: Zotero.getString('duplicatePrompt_message', [duplicates.length, names]),
+				button1Text: Zotero.getString('duplicatePrompt_importAnyway'),
+				button2Text: Zotero.getString('duplicatePrompt_skip')
+			});
+			// Import anyway: fall through and save; skip: report to the
+			// progress window and abort the save
+			if (result && result.button == 1) return false;
+			Zotero.Messaging.sendMessage("progressWindow.error", ['skippedDuplicate', items[0].title]);
+			return true;
+		}
+		catch (e) {
+			Zotero.logError(e);
+			return false;
+		}
+	},
 	
 	_saveToZotero: async function (items, attachmentCallback, itemsDoneCallback=()=>0) {
 		this._items = items;
+
+		// Optionally hold the save until the user confirms it in the progress
+		// popup. Target/tags/note edits made while waiting are queued and
+		// applied right after the save (see progressWindow_inject.js).
+		// Fails open on errors.
+		if (await Zotero.Prefs.getAsync('save.confirmBeforeSave')) {
+			let confirmed = true;
+			try {
+				confirmed = await Zotero.ProgressWindowConfirm.request(this._sessionID, items);
+			}
+			catch (e) {
+				Zotero.logError(e);
+			}
+			if (!confirmed) {
+				Zotero.debug("ItemSaver: save cancelled by user in the progress window");
+				Zotero.Messaging.sendMessage("progressWindow.error", ['saveCancelled']);
+				return items;
+			}
+		}
+
 		var payload = {
 			sessionID: this._sessionID,
 			uri: this._baseURI,
@@ -222,6 +364,8 @@ ItemSaver.prototype = {
 
 		Zotero.debug("Translate: Save via Zotero succeeded");
 		Zotero.Messaging.sendMessage("progressWindow.sessionCreated", { sessionID: this._sessionID });
+		Zotero.DuplicateChecker.remember(this._sessionID, items)
+			.catch(e => Zotero.logError(e));
 		triggerAIRecommendation(this._sessionID, items);
 		
 		const response = await Zotero.Connector.callMethod("getSelectedCollection", {})
@@ -447,6 +591,8 @@ ItemSaver.prototype = {
 		}
 		
 		Zotero.debug("Translate: Save to server complete");
+		Zotero.DuplicateChecker.remember(this._sessionID, items)
+			.catch(e => Zotero.logError(e));
 		itemsDoneCallback(items);
 		
 		const prefs = await Zotero.Prefs.getAsync(["downloadAssociatedFiles", "automaticSnapshots"])
@@ -612,3 +758,10 @@ ItemSaver.fetchAttachmentSafari = async function(attachment) {
 }
 
 Zotero.ItemSaver = ItemSaver;
+
+/**
+ * Re-run the AI collection/tag recommendation for an already-saved session
+ * on demand. Exposed on ItemSaver so the progress window (which runs
+ * itemSaver.js via the inject bundle) can call it directly.
+ */
+ItemSaver.retryAIRecommendation = retryAIRecommendation;

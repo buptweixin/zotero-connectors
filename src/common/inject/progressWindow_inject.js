@@ -63,9 +63,22 @@ if (isTopWindow) {
 	var blurred = false;
 	var frameSrc;
 	var frameIsHidden = false;
-	// While an AI recommendation is pending, keep the popup open (capped)
+	// While an AI recommendation is pending, keep the popup open (capped).
+	// Must exceed aiRecommender.js TIMEOUT_MS (30s) so the popup doesn't close
+	// before a slow endpoint answers.
 	var aiPendingUntil = 0;
-	var AI_HOLD_OPEN_MAX_MS = 20000;
+	var AI_HOLD_OPEN_MAX_MS = 32000;
+	// While a save confirmation is pending the popup must stay open: the save
+	// itself is on hold until the user clicks Save/Cancel
+	var saveConfirmDeferred = null;
+
+	function resolveSaveConfirmation(decision) {
+		if (!saveConfirmDeferred) return;
+		let deferred = saveConfirmDeferred;
+		saveConfirmDeferred = null;
+		addEvent("confirmSaveDone", {});
+		deferred.resolve(decision);
+	}
 	frameSrc = Zotero.getExtensionURL('progressWindow/progressWindow.html');
 	var scrollX;
 	var scrollY;
@@ -181,6 +194,13 @@ if (isTopWindow) {
 	}
 	
 	function hideFrame() {
+		if (saveConfirmDeferred) {
+			// A save is waiting for the user's confirmation; the popup must
+			// stay visible, but keep retrying the close in case the pending
+			// confirmation is resolved as we check
+			startCloseTimer(2000);
+			return;
+		}
 		if (Date.now() < aiPendingUntil) {
 			// An AI recommendation is still pending; keep the popup visible so
 			// the suggestion can be shown, but keep retrying the close
@@ -380,10 +400,12 @@ if (isTopWindow) {
 			}
 		});
 		
-		addMessageListener('progressWindowIframe.close', function() {
-			hideFrame();
-			window.focus();
-		});
+	addMessageListener('progressWindowIframe.close', function() {
+		// Closing the popup while a save is on hold means cancelling it
+		resolveSaveConfirmation(false);
+		hideFrame();
+		window.focus();
+	});
 
 		await frameReadyDeferred.promise;
 		return iframe;
@@ -482,7 +504,9 @@ if (isTopWindow) {
 		// the popup has been initialized (e.g., when displaying the Select Items dialog) it's
 		// not made visible
 		frameIsHidden = true;
-		
+
+		// A pending held-save cannot be confirmed once the popup is gone
+		resolveSaveConfirmation(false);
 		hideFrame();
 	});
 	
@@ -539,6 +563,45 @@ if (isTopWindow) {
 		aiPendingUntil = 0;
 		addEvent("aiSuggestion", data);
 	});
+
+	// Manually re-trigger the AI collection/tag recommendation from the
+	// progress window's "Generate"/"Retry" button. itemSaver.js caches the
+	// saved item's metadata per session, so the page doesn't need to be
+	// re-translated; it no-ops when AI is disabled or no metadata exists.
+	addMessageListener('progressWindowIframe.retryAI', function() {
+		if (!currentSessionID) return;
+		// Keep the popup open while the request is in flight
+		aiPendingUntil = Date.now() + AI_HOLD_OPEN_MAX_MS;
+		Zotero.ItemSaver.retryAIRecommendation(currentSessionID);
+	});
+
+	// Decision from the progress window's confirm-save bar
+	addMessageListener('progressWindowIframe.confirmSaveDecision', function(decision) {
+		resolveSaveConfirmation(decision == true);
+	});
+
+	/**
+	 * Held-save confirmation. Zotero.ItemSaver awaits request() before
+	 * calling saveItems on the client; the returned promise resolves true
+	 * when the user clicks "Save" in the progress window, false on "Cancel"
+	 * or when the popup is closed.
+	 */
+	Zotero.ProgressWindowConfirm = {
+		request: function(sessionID, items) {
+			resolveSaveConfirmation(false); // supersede any stale request
+			saveConfirmDeferred = Zotero.Promise.defer();
+			showFrame();
+			addEvent("confirmSave", {
+				sessionID,
+				items: items.map(item => ({
+					id: item.id,
+					title: item.title || '',
+					itemType: item.itemType
+				}))
+			});
+			return saveConfirmDeferred.promise;
+		}
+	};
 }
 
 })();

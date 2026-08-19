@@ -27,6 +27,10 @@
  * There's a limit of 10MB for locally stored data.
  * https://developer.chrome.com/extensions/storage#property-local
  */
+// Pref names whose values must never appear in debug output (which users can
+// submit to zotero.org), e.g. the AI provider API key
+const SENSITIVE_PREF_NAMES = /(?:api.?key|secret|token|password)/i;
+
 Zotero.Prefs = Object.assign(Zotero.Prefs, {
 	init: async function() {
 		try {
@@ -39,7 +43,8 @@ Zotero.Prefs = Object.assign(Zotero.Prefs, {
 	},
 
 	set: async function(pref, value) {
-		Zotero.debug("Setting "+pref+" to "+JSON.stringify(value).substr(0, 100));
+		Zotero.debug("Setting "+pref+" to "
+			+ (SENSITIVE_PREF_NAMES.test(pref) ? "[value redacted]" : JSON.stringify(value).substr(0, 100)));
 		let prefs = {};
 		prefs[pref] = value;
 

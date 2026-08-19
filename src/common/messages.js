@@ -314,6 +314,10 @@ var MESSAGES = {
 	AIRecommender: {
 		recommend: true,
 		testConnection: true,
+	},
+	DuplicateChecker: {
+		check: true,
+		remember: true,
 	}
 };
 

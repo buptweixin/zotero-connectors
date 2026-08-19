@@ -61,13 +61,13 @@
 					</div>
 				</div>
 			</div>
-			<div class="group">
+			<div class="group ai">
 				<div class="group-title">AI Recommendations</div>
 				<div class="group-content">
 					<p>
 						<label><input type="checkbox" data-pref="ai.enabled"/>&nbsp;Suggest a collection and tags for saved papers using a large language model</label>
 					</p>
-					<div id="ai-config">
+					<fieldset id="ai-config">
 						<p>
 							<label>Provider
 								<select id="ai-provider">
@@ -91,7 +91,31 @@
 							Requests go directly from your browser to the configured endpoint.
 							The API key is stored in this extension's local storage.
 						</p>
-					</div>
+					</fieldset>
+				</div>
+			</div>
+			<div class="group">
+				<div class="group-title">Save Confirmation</div>
+				<div class="group-content">
+					<p>
+						<label><input type="checkbox" data-pref="save.confirmBeforeSave"/>&nbsp;Hold saves and confirm in the popup before items are added to Zotero</label>
+					</p>
+					<p style="color: gray; font-size: 12px;">
+						While waiting you can pick the collection, tags and note in the save popup;
+						they are applied when you confirm. Cancelling (or closing the popup) adds nothing.
+					</p>
+				</div>
+			</div>
+			<div class="group">
+				<div class="group-title">Duplicate Detection</div>
+				<div class="group-content">
+					<p>
+						<label><input type="checkbox" data-pref="duplicateChecker.enabled"/>&nbsp;Ask before saving a paper that was already saved through this connector</label>
+					</p>
+					<p style="color: gray; font-size: 12px;">
+						Detection covers items previously saved with this extension (matched by DOI or title).
+						Items added directly in Zotero are not tracked, since the Zotero client offers no way to search the library.
+					</p>
 				</div>
 			</div>
 			<div class="group" style="display: none" id="intercept-and-import">

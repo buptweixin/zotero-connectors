@@ -34,8 +34,13 @@
 		it tries to. All legitimate HTTP from translators is proxied through
 		Zotero.HTTP.request, which is overridden in offscreenFunctionOverrides.js
 		to route via messaging to the service worker.
+
+		No frame-ancestors here: that directive is ignored (with a console
+		error) when delivered via <meta> — it only works in an HTTP header,
+		which extension pages can't set. Embedding by web content is already
+		blocked because this page is not listed in web_accessible_resources.
 	-->
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; form-action 'none'; frame-ancestors 'self';">	
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; form-action 'none';">
 	<title>Zotero - Offscreen Translate Sandbox</title>
 </head>
 <body>

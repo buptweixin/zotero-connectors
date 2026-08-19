@@ -143,6 +143,48 @@
 	"progressWindow_ai_unavailable": {
 		"message": "AI suggestion unavailable"
 	},
+	"progressWindow_ai_noSuggestion": {
+		"message": "No AI suggestion yet"
+	},
+	"progressWindow_ai_generate": {
+		"message": "Generate"
+	},
+	"progressWindow_ai_retry": {
+		"message": "Retry"
+	},
+	"progressWindow_ai_regenerate": {
+		"message": "Regenerate suggestion"
+	},
+	"progressWindow_skippedDuplicate": {
+		"message": "Skipped saving \"$1\" — it was already saved to Zotero",
+		"description": "$1 is the title of the skipped item"
+	},
+	"duplicatePrompt_title": {
+		"message": "Possible duplicate"
+	},
+	"duplicatePrompt_message": {
+		"message": "$1 item(s) match papers already saved through this connector:<br/>$2<br/><br/>Import anyway?<br/><span style=\"color: gray;\">Only items previously saved via the connector are tracked; items added directly in Zotero are not detected.</span>",
+		"description": "$1 is the number of duplicates, $2 is a list of titles (HTML)"
+	},
+	"duplicatePrompt_importAnyway": {
+		"message": "Import Anyway"
+	},
+	"duplicatePrompt_skip": {
+		"message": "Skip"
+	},
+	"progressWindow_confirmSave_title": {
+		"message": "Save $1 item(s) to Zotero?",
+		"description": "$1 is the number of items waiting for confirmation"
+	},
+	"progressWindow_confirmSave_save": {
+		"message": "Save"
+	},
+	"progressWindow_confirmSave_cancel": {
+		"message": "Cancel"
+	},
+	"progressWindow_saveCancelled": {
+		"message": "Save cancelled — nothing was added to Zotero"
+	},
 	"progressWindow_ai_newCollection": {
 		"message": "New collection: $1",
 		"description": "$1 is the name of the collection suggested to be created"

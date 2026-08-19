@@ -373,6 +373,11 @@ Zotero.Prefs = new function() {
 		"ai.autoApply": false,
 		"ai.maxTags": 5,
 
+		"duplicateChecker.enabled": true,
+		"duplicateChecker.history": [],
+
+		"save.confirmBeforeSave": true,
+
 		"shortcuts.cite": {ctrlKey: true, altKey: true, key: 'c'}
 	};
 

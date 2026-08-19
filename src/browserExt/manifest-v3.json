@@ -1,8 +1,8 @@
 {
-	"name": "Zotero Connector",
+	"name": "Zotero Connector AI",
 	"manifest_version": 3,
 	"version": "AUTOFILLED",
-	"description": "Save references to Zotero from your web browser",
+	"description": "Save references to Zotero from your web browser, with AI-powered collection and tag recommendations",
 	"default_locale": "en",
 	"action": {
 		"default_icon": {

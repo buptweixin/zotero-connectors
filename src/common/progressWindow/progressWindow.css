@@ -275,6 +275,15 @@ button:active {
 	margin-bottom: 4px;
 }
 
+/* Same layout as .ProgressWindow-error, but for non-error notices such as
+   "updated the existing item" in the duplicate-update flow */
+.ProgressWindow-info {
+	font-size: 13px;
+	line-height: 1.4em;
+	margin-bottom: 4px;
+	color: #3d8b3d;
+}
+
 /* ---------------------- AI suggestion row -------------------------- */
 
 .ProgressWindow-aiRow {

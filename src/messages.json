@@ -143,6 +143,21 @@
 	"progressWindow_ai_unavailable": {
 		"message": "AI suggestion unavailable"
 	},
+	"progressWindow_ai_error_notConfigured": {
+		"message": "AI is on, but its endpoint isn't configured yet"
+	},
+	"progressWindow_ai_error_clientUnavailable": {
+		"message": "The Zotero app must be running for AI suggestions"
+	},
+	"progressWindow_ai_disabled": {
+		"message": "AI suggestions are off"
+	},
+	"progressWindow_ai_enable": {
+		"message": "Enable…"
+	},
+	"progressWindow_ai_settings": {
+		"message": "Settings…"
+	},
 	"progressWindow_ai_noSuggestion": {
 		"message": "No AI suggestion yet"
 	},
@@ -171,6 +186,38 @@
 	},
 	"duplicatePrompt_skip": {
 		"message": "Skip"
+	},
+	"duplicatePrompt_found_title": {
+		"message": "Already in your Zotero library"
+	},
+	"duplicatePrompt_update_message": {
+		"message": "$1 item(s) with the same title or DOI already exist in your Zotero library:<br/>$2<br/><br/>The existing item will be moved to the selected collection and its tags updated. Nothing new will be added.",
+		"description": "$1 is the number of duplicates, $2 is a list of titles (HTML)"
+	},
+	"duplicatePrompt_reveal_message": {
+		"message": "$1 item(s) with the same title or DOI already exist in your Zotero library:<br/>$2<br/><br/>Zotero doesn't let the connector modify existing items this long after they were saved, so the existing item will be opened in Zotero for you to update there.",
+		"description": "$1 is the number of duplicates, $2 is a list of titles (HTML)"
+	},
+	"duplicatePrompt_updateExisting": {
+		"message": "Update Existing"
+	},
+	"duplicatePrompt_revealInZotero": {
+		"message": "Open in Zotero"
+	},
+	"duplicatePrompt_saveAsNew": {
+		"message": "Save as New"
+	},
+	"progressWindow_updatedExisting": {
+		"message": "Updated the existing item \"$1\" — collection & tags applied, nothing new added",
+		"description": "$1 is the title of the updated item"
+	},
+	"progressWindow_updateFailedExisting": {
+		"message": "Couldn't update the existing item \"$1\" — nothing was saved",
+		"description": "$1 is the title of the item"
+	},
+	"progressWindow_revealedDuplicate": {
+		"message": "Already in Zotero: \"$1\" was opened there",
+		"description": "$1 is the title of the existing item"
 	},
 	"progressWindow_confirmSave_title": {
 		"message": "Save $1 item(s) to Zotero?",

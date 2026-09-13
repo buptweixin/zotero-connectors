@@ -236,6 +236,48 @@ Zotero_Preferences.AI = {
 			}
 			button.disabled = false;
 		};
+
+		// Populate the model dropdown from the configured endpoint. The
+		// visible field values are flushed to prefs first so an edited Base
+		// URL or API key is used without requiring a change/blur event
+		// (bindPref only persists on change).
+		let fetchButton = document.getElementById('ai-button-fetch-models');
+		let fetchStatus = document.getElementById('ai-span-fetch-models-status');
+		fetchButton.onclick = async function() {
+			fetchStatus.style.color = '';
+			fetchStatus.textContent = 'Fetching…';
+			fetchButton.disabled = true;
+			try {
+				await Promise.all([
+					Zotero.Prefs.set('ai.provider', document.getElementById('ai-provider').value),
+					Zotero.Prefs.set('ai.baseUrl', document.getElementById('ai-base-url').value.trim()),
+					Zotero.Prefs.set('ai.apiKey', document.getElementById('ai-api-key').value.trim())
+				]);
+				let res = await Zotero.AIRecommender.listModels();
+				if (res.ok) {
+					let datalist = document.getElementById('ai-model-options');
+					datalist.innerHTML = '';
+					for (let model of res.models) {
+						let option = document.createElement('option');
+						option.value = model;
+						datalist.appendChild(option);
+					}
+					fetchStatus.style.color = res.models.length ? 'green' : 'red';
+					fetchStatus.textContent = res.models.length
+						? `Loaded ${res.models.length} models`
+						: 'No models returned';
+				}
+				else {
+					fetchStatus.style.color = 'red';
+					fetchStatus.textContent = `Failed: ${res.message}`;
+				}
+			}
+			catch (e) {
+				fetchStatus.style.color = 'red';
+				fetchStatus.textContent = `Failed: ${e.message}`;
+			}
+			fetchButton.disabled = false;
+		};
 	},
 
 	/**

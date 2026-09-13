@@ -332,7 +332,10 @@ Zotero.Connector_Browser = new function() {
 	};
 		
 	this.isIncognito = function(tab) {
-		return tab.incognito;
+		// Offscreen translation does not have a tab object available. Treat
+		// that context as non-incognito instead of throwing while reporting a
+		// translator error.
+		return !!tab?.incognito;
 	}
 
 	this.isTabFocused = function(tab) {
@@ -360,6 +363,29 @@ Zotero.Connector_Browser = new function() {
 		try {
 			let response = await Zotero.Messaging.sendMessage('ping', null, tab, frameId)
 			if (response && frameId == 0) return deferred.resolve();
+
+			// After an extension reload, Chrome may keep the old content-script
+			// isolated world alive in an already-open tab while the old runtime
+			// message listener is gone. Injecting the whole bundle again would
+			// redeclare its top-level const/let bindings and leave the page
+			// broken. Detect that old bundle before injecting it a second time.
+			let existingScript = Zotero.isManifestV3
+				? await Zotero.Connector_Browser.executeScript(tab.id, {
+					frameId,
+					func: () => Boolean(globalThis.Zotero)
+				})
+				: await browser.tabs.executeScript(tab.id, {
+					code: 'Boolean(globalThis.Zotero)',
+					frameId
+				});
+			let alreadyInjected = existingScript?.some(result =>
+				Zotero.isManifestV3 ? result.result : result
+			);
+			if (alreadyInjected) {
+				Zotero.debug(`Translation Inject: Scripts already present in ${frameId}; skipping reinjection`);
+				return deferred.resolve();
+			}
+
 			url = url ? `${url} - ${tab.url}` : tab.url
 			Zotero.debug(`Injecting translation scripts into ${frameId} ${url}`);
 			return await Zotero.Connector_Browser.injectScripts(_injectTranslationScripts, tab, frameId);

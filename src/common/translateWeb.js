@@ -106,6 +106,15 @@ let TranslateWeb = {
 			translate.setTranslator(translator);
 			try {
 				let items = await translate.translate();
+				// A translator that completes without producing an item has
+				// failed just as surely as one that throws. Treat it as a
+				// translation failure so the caller can try the next translator
+				// instead of opening a misleading "Save 0 item(s)" prompt.
+				// Multiple-item translators may legitimately return no items when
+				// the user closes the selection without choosing anything.
+				if ((!Array.isArray(items) || !items.length) && translator.itemType != 'multiple') {
+					throw new Error(`Translator "${translator.label}" returned no items`);
+				}
 				return {
 					items,
 					proxy: translate._proxy

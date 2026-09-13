@@ -49,6 +49,80 @@ function determineAttachmentType(attachment) {
 }
 
 /**
+ * arXiv's API host is frequently rate-limited. When the normal arXiv
+ * translator cannot reach export.arxiv.org, use the public abstract page,
+ * which exposes the same core citation metadata in citation_* meta tags.
+ *
+ * @returns {Promise<Object[]|null>}
+ */
+async function translateArxivFromAbstractPage() {
+	let match = document.location.href.match(
+		/^https?:\/\/(?:[^.]+\.)?(?:arxiv\.org|xxx\.lanl\.gov)\/(?:pdf|abs)\/([^?#]+?)(?:\.pdf)?(?:[?#]|$)/i
+	);
+	if (!match) return null;
+
+	let arxivID = decodeURIComponent(match[1]).replace(/\.pdf$/i, '');
+	let version = '';
+	let versionMatch = arxivID.match(/v(\d+)$/i);
+	if (versionMatch) {
+		version = versionMatch[1];
+		arxivID = arxivID.slice(0, -versionMatch[0].length);
+	}
+	if (!arxivID) return null;
+
+	let path = arxivID.split('/').map(part => encodeURIComponent(part)).join('/');
+	let absURL = `https://arxiv.org/abs/${path}`;
+	try {
+		let xhr = await Zotero.HTTP.request('GET', absURL, {
+			responseType: 'document',
+			timeout: 30e3,
+			maxBackoff: 0
+		});
+		let doc = xhr.response;
+		let meta = name => doc.querySelector(`meta[name="${name}"]`)?.getAttribute('content')?.trim() || '';
+		let title = meta('citation_title');
+		if (!title) return null;
+
+		let creators = Array.from(doc.querySelectorAll('meta[name="citation_author"]'))
+			.map(node => (node.getAttribute('content') || '').trim())
+			.filter(Boolean)
+			.map(author => {
+				let [lastName, ...firstName] = author.split(',');
+				return {
+					firstName: firstName.join(',').trim(),
+					lastName: lastName.trim(),
+					creatorType: 'author'
+				};
+			});
+		let date = meta('citation_date').replace(/\//g, '-');
+		let pdfURL = meta('citation_pdf_url') || `https://arxiv.org/pdf/${path}`;
+		let doi = `10.48550/arXiv.${arxivID}`;
+		let item = {
+			itemType: 'preprint',
+			title,
+			creators,
+			abstractNote: meta('citation_abstract'),
+			date,
+			publisher: 'arXiv',
+			archiveID: `arXiv:${arxivID}`,
+			number: `arXiv:${arxivID}`,
+			DOI: doi,
+			url: absURL,
+			extra: `arXiv:${arxivID}${version ? `\nversion: ${version}` : ''}`,
+			attachments: [
+				{ title: 'Preprint PDF', url: pdfURL, mimeType: 'application/pdf' },
+				{ title: 'Snapshot', url: absURL, mimeType: 'text/html' }
+			]
+		};
+		return [item];
+	}
+	catch (e) {
+		Zotero.debug(`arXiv abstract-page fallback failed: ${e.message || e}`);
+		return null;
+	}
+}
+
+/**
  * Namespace for page saving related functions injected into pages by the connector
  */
 let PageSaving = {
@@ -274,11 +348,42 @@ let PageSaving = {
 			}
 		}
 
+		let items, proxy;
+		const saveArxivItems = async arxivItems => {
+			items = arxivItems;
+			let itemSaver = new ItemSaver({
+				sessionID,
+				itemType: arxivItems[0].itemType,
+				baseURI: document.location.href
+			});
+			this.sessionDetails.items = arxivItems;
+			this.sessionDetails.itemSaver = itemSaver;
+			return itemSaver.saveItems(arxivItems, PageSaving._onAttachmentProgress, onItemsSaved);
+		};
+
+		// Avoid the arXiv translator's rate-limited export API entirely. The
+		// abstract page exposes the citation metadata needed for a normal paper
+		// save, and this also prevents a handled API failure from being reported
+		// as an extension error in Chrome.
+		if (translators[0]?.label == 'arXiv.org') {
+			let arxivItems = await translateArxivFromAbstractPage();
+			if (arxivItems?.length) return saveArxivItems(arxivItems);
+		}
+
 		let translate = await this._initTranslate(translators[0].itemType);
 		let options = { translate, translators: translators.slice(), onSelect, onItemSaving, onTranslatorFallback };
 		try {
-			var { items, proxy } = await Zotero.TranslateWeb.translate(options);
+			({ items, proxy } = await Zotero.TranslateWeb.translate(options));
 		} catch (e) {
+			// The arXiv translator uses export.arxiv.org, which can return 429
+			// even when the public abstract page is available. Keep the save as a
+			// paper instead of silently degrading to a generic webpage/PDF save.
+			if (translators[0]?.label == 'arXiv.org') {
+				let arxivItems = await translateArxivFromAbstractPage();
+				if (arxivItems?.length) {
+					return saveArxivItems(arxivItems);
+				}
+			}
 			if (translators[0].itemType != 'multiple' && fallbackOnFailure) {
 				Zotero.Messaging.sendMessage("progressWindow.error", ['fallback', this.translators.at(-1).label, "Save as Webpage"]);
 				Zotero.debug(`Saving with ${translators[0].label} failed. Falling back to saving as webpage`);
@@ -291,6 +396,14 @@ let PageSaving = {
 			if (proxy) proxy = new Zotero.Proxy(proxy);
 		}
 		items = this._processNote(items);
+		// Do not pass an empty translation to ItemSaver. For multiple-item
+		// translators this means that the user selected nothing; for all other
+		// translators TranslateWeb has already tried the fallback chain and an
+		// empty result is a translator failure.
+		if (!Array.isArray(items) || !items.length) {
+			Zotero.debug(`PageSaving: ${translators[0].label} returned no items`);
+			return [];
+		}
 		this.sessionDetails.items = items;
 		let itemType = translators[0].itemType;
 		let itemSaver = new Zotero.ItemSaver({ sessionID, itemType, baseURI: document.location.href, proxy });
@@ -476,7 +589,20 @@ let PageSaving = {
 			Zotero.Messaging.sendMessage("progressWindow.itemProgress", { ...progressItem, ...{ progress: 100 } });
 
 			if (canRecognize) {
-				let item = await Zotero.Connector.callMethod("getRecognizedItem", { sessionID: sessionID });
+				let item;
+				try {
+					// PDF/EPUB recognition can involve network metadata lookup and
+					// regularly exceeds the connector's 15s default timeout. A
+					// recognition timeout must not turn an already-saved attachment
+					// into a failed save.
+					item = await Zotero.Connector.callMethod(
+						{ method: "getRecognizedItem", timeout: 60e3 },
+						{ sessionID: sessionID }
+					);
+				}
+				catch (e) {
+					Zotero.debug(`PDF recognition result unavailable: ${e.message || e}`);
+				}
 				if (item) {
 					item.id = 2;
 					item.iconSrc = Zotero.ItemTypes.getImageSrc(item.itemType);

@@ -45,10 +45,29 @@ function rememberAIItemMeta(sessionID, meta) {
 }
 
 /**
+ * Escape untrusted item titles before they are interpolated into the HTML
+ * of a modal prompt message
+ */
+function escapeHTML(text) {
+	return String(text || '')
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;');
+}
+
+function isModalPromptUnavailable(error) {
+	return /Timed out while injecting modal prompt|message channel closed/i.test(error?.message || error || '');
+}
+
+/**
  * Build the compact metadata payload sent to the AI recommender from a
  * translated item.
  */
 function buildItemMeta(item) {
+	if (item.itemType == 'note') {
+		// Notes have no title/abstract fields; derive both from the content
+		return buildNoteItemMeta(item);
+	}
 	return {
 		title: item.title,
 		abstractNote: item.abstractNote || '',
@@ -56,6 +75,26 @@ function buildItemMeta(item) {
 			.map(c => c.lastName || c.name).filter(Boolean).join(', '),
 		publicationTitle: item.publicationTitle || item.publisher || '',
 		itemType: item.itemType,
+		url: item.url || ''
+	};
+}
+
+/**
+ * Derive recommender metadata from a note item's HTML content. The markup is
+ * parsed in a detached element that is never attached to the page, so
+ * embedded scripts don't run and nothing renders. Note content is untrusted:
+ * it is only ever sent to the LLM as data, never executed.
+ */
+function buildNoteItemMeta(item) {
+	let container = document.createElement('div');
+	container.innerHTML = item.note || '';
+	let text = (container.textContent || '').replace(/\s+/g, ' ').trim();
+	return {
+		title: text.slice(0, 80),
+		abstractNote: text.slice(0, 2000),
+		creators: '',
+		publicationTitle: '',
+		itemType: 'note',
 		url: item.url || ''
 	};
 }
@@ -86,19 +125,29 @@ async function runAIRecommendation(sessionID, meta) {
  * work happens in the background (Zotero.AIRecommender via messaging); the
  * result is reported to the progress window. Never blocks or fails the save.
  *
- * The item metadata is cached per session so the recommendation can be
- * re-triggered manually from the progress window when the automatic run did
- * not fire or did not produce a suggestion.
+ * Every single-item save (except plain webpages with the feature disabled)
+ * keeps the AI row visible in the progress window in a state that reflects
+ * why the automatic run did or didn't happen — feature off, endpoint not
+ * configured, client unavailable, no usable metadata, or a ready suggestion —
+ * so the user can always act on it: enable the feature, open its settings,
+ * or generate a suggestion manually from the cached item metadata.
  *
  * @param {String} sessionID
  * @param {Array} items - translated items (single-item saves only)
  */
 async function triggerAIRecommendation(sessionID, items) {
-	if (!await Zotero.Prefs.getAsync('ai.enabled')) return;
 	if (!items || items.length !== 1) return;
 	let item = items[0];
-	if (!item.title) return;
 	let meta = buildItemMeta(item);
+	if (!await Zotero.Prefs.getAsync('ai.enabled')) {
+		// Webpage saves are the most casual action and never get an automatic
+		// run, so they stay quiet; papers and notes surface an "Enable…" row
+		if (item.itemType != 'webpage') {
+			rememberAIItemMeta(sessionID, meta);
+			reportAISuggestion(sessionID, { disabled: true });
+		}
+		return;
+	}
 	// Cache the metadata even when the automatic run is skipped below, so the
 	// progress window's "Generate" button can still trigger a recommendation
 	// for this session
@@ -110,21 +159,27 @@ async function triggerAIRecommendation(sessionID, items) {
 		reportAISuggestion(sessionID, {});
 		return;
 	}
+	if (!meta.title) {
+		// Nothing to base a prompt on, but keep the row visible (and the
+		// metadata cache warm) for symmetry with the webpage case
+		reportAISuggestion(sessionID, {});
+		return;
+	}
 	await runAIRecommendation(sessionID, meta);
 }
 
 /**
  * Manually re-trigger the AI recommendation for an already-saved session.
- * Called from the progress window's "Generate"/"Retry" button. When the
- * feature is disabled or no metadata was captured for this session, an
- * explicit error suggestion is reported so the progress window doesn't get
- * stuck in its pending state.
+ * Called from the progress window's "Generate"/"Retry"/"Enable…" buttons.
+ * When the feature is disabled or no metadata was captured for this session,
+ * an explicit state is reported so the progress window doesn't get stuck in
+ * its pending state.
  *
  * @param {String} sessionID
  */
 async function retryAIRecommendation(sessionID) {
 	if (!await Zotero.Prefs.getAsync('ai.enabled')) {
-		reportAISuggestion(sessionID, { error: 'not-configured' });
+		reportAISuggestion(sessionID, { disabled: true });
 		return;
 	}
 	let meta = _aiSessionMeta.get(sessionID);
@@ -212,6 +267,12 @@ ItemSaver.prototype = {
 	 * @param {Function} [itemsDoneCallback] A callback that receives progress for top-item saving.
 	 */
 	saveItems: async function (items, attachmentCallback, itemsDoneCallback=()=>0) {
+		// An empty translation is not a save operation. In particular, do not
+		// open the confirm-before-save prompt with a zero-item payload.
+		if (!Array.isArray(items) || !items.length) {
+			Zotero.debug("ItemSaver.saveItems: No items to save");
+			return [];
+		}
 		Zotero.debug(`ItemSaver.saveItems: Saving ${items.length} items`);
 		if (await this._checkDuplicates(items)) {
 			return items;
@@ -228,9 +289,11 @@ ItemSaver.prototype = {
 	},
 
 	/**
-	 * When any item about to be saved was already saved through this
-	 * connector before, ask whether to import anyway. Returns true when the
-	 * save should be skipped. Fails open (never blocks the save on errors).
+	 * When any item about to be saved already exists in the Zotero library
+	 * (or was already saved through this connector before), ask what to do.
+	 * Returns true when the save should be skipped because an existing item
+	 * is being updated or revealed instead. Fails open (never blocks the
+	 * save on errors).
 	 *
 	 * @param {Object[]} items
 	 * @returns {Promise<Boolean>} true = skip the save
@@ -239,17 +302,43 @@ ItemSaver.prototype = {
 		try {
 			if (!await Zotero.Prefs.getAsync('duplicateChecker.enabled')) return false;
 			if (!items || !items.some(item => item.itemType != 'webpage')) return false;
+
+			// The client's local API is authoritative: it also sees items
+			// added directly in Zotero, not just connector saves
+			let library = await Zotero.DuplicateChecker.checkInLibrary(items);
+			if (library.available) {
+				let pairs = library.matches
+					.map((match, i) => match && match.key ? [items[i], match] : null)
+					.filter(Boolean);
+				let checkable = library.matches.filter(m => m !== undefined).length;
+				if (pairs.length && pairs.length == checkable) {
+					return await this._handleExistingItems(pairs);
+				}
+				if (!pairs.length) return false;
+				// Partial overlap in a multi-item save: fall through to the
+				// history prompt below without blocking the whole batch
+			}
+
 			let { duplicates } = await Zotero.DuplicateChecker.check(items);
 			if (!duplicates || !duplicates.length) return false;
 
-			let names = duplicates.slice(0, 3).map(d => `&bull; ${d.title}`).join('<br/>');
+			let names = duplicates.slice(0, 3).map(d => `&bull; ${escapeHTML(d.title)}`).join('<br/>');
 			if (duplicates.length > 3) names += '<br/>&bull; &hellip;';
-			let result = await Zotero.ModalPrompt.confirm({
-				title: Zotero.getString('duplicatePrompt_title'),
-				message: Zotero.getString('duplicatePrompt_message', [duplicates.length, names]),
-				button1Text: Zotero.getString('duplicatePrompt_importAnyway'),
-				button2Text: Zotero.getString('duplicatePrompt_skip')
-			});
+			let result;
+			try {
+				result = await Zotero.ModalPrompt.confirm({
+					title: Zotero.getString('duplicatePrompt_title'),
+					message: Zotero.getString('duplicatePrompt_message', [duplicates.length, names]),
+					button1Text: Zotero.getString('duplicatePrompt_importAnyway'),
+					button2Text: Zotero.getString('duplicatePrompt_skip')
+				});
+			}
+			catch (e) {
+				if (!isModalPromptUnavailable(e)) throw e;
+				Zotero.debug(`DuplicateChecker: modal prompt unavailable; skipping duplicate ${items[0].title}`);
+				Zotero.Messaging.sendMessage('progressWindow.error', ['skippedDuplicate', items[0].title]);
+				return true;
+			}
 			// Import anyway: fall through and save; skip: report to the
 			// progress window and abort the save
 			if (result && result.button == 1) return false;
@@ -260,6 +349,123 @@ ItemSaver.prototype = {
 			Zotero.logError(e);
 			return false;
 		}
+	},
+
+	/**
+	 * Items about to be saved already exist in the Zotero library. Unless
+	 * the user explicitly chooses to save a new copy, the existing items
+	 * win: they are updated in place (collections & tags, via a still-live
+	 * client save session) or, when no live session is left, revealed in
+	 * the client — a stock Zotero client offers no other way to touch an
+	 * existing item from the connector.
+	 *
+	 * @param {Array[]} pairs - [item, match] pairs
+	 * @returns {Promise<Boolean>} true when the normal save should be skipped
+	 */
+	_handleExistingItems: async function(pairs) {
+		let clientData = {};
+		try {
+			clientData = await Zotero.Connector.callMethod("getSelectedCollection", {});
+		}
+		catch (e) { }
+
+		// A live save session lets us apply the update directly. A library
+		// (rather than collection) target would strip the item's collections
+		// client-side, so require a selected collection in that case.
+		let canUpdate = pairs.length == 1
+			&& pairs[0][1].sessionID
+			&& clientData.id;
+
+		let names = pairs.slice(0, 3).map(([, match]) => `&bull; ${escapeHTML(match.title)}`).join('<br/>');
+		if (pairs.length > 3) names += '<br/>&bull; &hellip;';
+		let result;
+		try {
+			result = await Zotero.ModalPrompt.confirm({
+				title: Zotero.getString('duplicatePrompt_found_title'),
+				message: Zotero.getString(
+					canUpdate ? 'duplicatePrompt_update_message' : 'duplicatePrompt_reveal_message',
+					[pairs.length, names]
+				),
+				button1Text: Zotero.getString(canUpdate
+					? 'duplicatePrompt_updateExisting' : 'duplicatePrompt_revealInZotero'),
+				button2Text: Zotero.getString('duplicatePrompt_saveAsNew')
+			});
+		}
+		catch (e) {
+			if (!isModalPromptUnavailable(e)) throw e;
+			// PDF viewers don't reliably accept an injected modal iframe. Keep
+			// duplicate protection fail-safe there instead of saving another copy.
+			Zotero.debug(`DuplicateChecker: modal prompt unavailable; skipping duplicate ${pairs[0][0].title}`);
+			Zotero.Messaging.sendMessage('progressWindow.error', ['skippedDuplicate', pairs[0][0].title]);
+			return true;
+		}
+		// Only an explicit choice adds a duplicate copy; dismissing the
+		// dialog goes with the default (update/reveal)
+		if (result && result.button == 2) return false;
+
+		if (canUpdate) {
+			try {
+				await this._applyExistingItemUpdate(pairs[0][0], pairs[0][1], clientData);
+				Zotero.Messaging.sendMessage("progressWindow.error", ['updatedExisting', pairs[0][0].title]);
+			}
+			catch (e) {
+				Zotero.logError(e);
+				Zotero.Messaging.sendMessage("progressWindow.error", ['updateFailedExisting', pairs[0][0].title]);
+			}
+		}
+		else {
+			// Select the existing item in the client
+			window.location.href = `zotero://select/library/items/${pairs[0][1].key}`;
+			Zotero.Messaging.sendMessage("progressWindow.error", ['revealedDuplicate', pairs[0][1].title]);
+		}
+		return true;
+	},
+
+	/**
+	 * Move an existing library item to the save target and merge tags by
+	 * reusing its (still-live) original save session. The client keeps the
+	 * item's automatic tags and replaces manual ones with the sent list, so
+	 * the existing manual tags are merged in. AI suggestions (when enabled)
+	 * are applied in the same update.
+	 */
+	_applyExistingItemUpdate: async function(item, match, clientData) {
+		let target = "C" + clientData.id;
+		let tags = new Set();
+		for (let tag of match.tags || []) {
+			// Automatic (type 1) tags are preserved client-side anyway
+			if (!tag.type) tags.add(tag.tag);
+		}
+		for (let tag of item.tags || []) {
+			tags.add(typeof tag == 'string' ? tag : tag.tag);
+		}
+
+		if (await Zotero.Prefs.getAsync('ai.enabled')) {
+			Zotero.Messaging.sendMessage("progressWindow.aiPending", { sessionID: this._sessionID });
+			let suggestion = await Zotero.AIRecommender.recommend({
+				sessionID: this._sessionID,
+				item: buildItemMeta(item)
+			});
+			if (suggestion && !suggestion.error) {
+				for (let tag of suggestion.tags || []) tags.add(tag);
+				if (suggestion.collection) target = suggestion.collection.id;
+				// Applied below in the same update; reported as already
+				// applied so the progress window doesn't offer an Apply
+				// action that would target this (never-created) session
+				reportAISuggestion(this._sessionID, Object.assign({}, suggestion, { autoApplied: true }));
+			}
+			else if (suggestion && suggestion.error) {
+				reportAISuggestion(this._sessionID, suggestion);
+			}
+		}
+
+		// updateSession splits the tag list on commas client-side, so commas
+		// inside a single tag name cannot survive the round trip
+		let tagList = [...tags].map(tag => tag.replace(/,/g, ' '));
+		await Zotero.Connector.callMethod("updateSession", {
+			sessionID: match.sessionID,
+			target,
+			tags: tagList.join(', ')
+		});
 	},
 	
 	_saveToZotero: async function (items, attachmentCallback, itemsDoneCallback=()=>0) {
@@ -594,7 +800,12 @@ ItemSaver.prototype = {
 		Zotero.DuplicateChecker.remember(this._sessionID, items)
 			.catch(e => Zotero.logError(e));
 		itemsDoneCallback(items);
-		
+		// This path runs when the Zotero client isn't available; the
+		// recommender needs the client (getSelectedCollection/updateSession),
+		// so this surfaces an explicit "client unavailable" state instead of
+		// the AI row silently never appearing
+		triggerAIRecommendation(this._sessionID, items);
+
 		const prefs = await Zotero.Prefs.getAsync(["downloadAssociatedFiles", "automaticSnapshots"])
 
 		for (const item of items) {

@@ -112,6 +112,14 @@ Zotero.Messaging = new function() {
 								throw e;
 							}
 						}, function(e) {
+							// A content script can outlive an extension reload. Its
+							// pending messages then reject with this expected error;
+							// there is no valid response to propagate from the old
+							// extension context, and rethrowing only creates an
+							// unhandled error in the page.
+							if (e?.message && /Extension context invalidated/i.test(e.message)) {
+								return;
+							}
 							// Unclear what to do with these. Chrome doesn't have error instance defined
 							// and these could be simply messages saying that no response was received for
 							// calls that didn't expect a response either.

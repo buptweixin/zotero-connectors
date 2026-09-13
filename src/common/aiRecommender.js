@@ -182,6 +182,24 @@ Zotero.AIRecommender = new function() {
 	};
 
 	/**
+	 * List the model ids available on the configured endpoint. Called from
+	 * the preferences page to populate the model dropdown.
+	 * @returns {Promise<Object>} {ok: true, models: string[]} or {ok: false, message}
+	 */
+	this.listModels = async function() {
+		let config = this.getConfig();
+		if (!config) return { ok: false, message: 'AI recommendations are disabled or the endpoint is not fully configured' };
+		try {
+			let models = await fetchModels(config);
+			models.sort((a, b) => a.localeCompare(b));
+			return { ok: true, models };
+		}
+		catch (e) {
+			return { ok: false, message: String(e.message || e).slice(0, 300) };
+		}
+	};
+
+	/**
 	 * Call the configured LLM provider and return the text content of the reply
 	 * @param {Object} config
 	 * @param {String} system
@@ -251,14 +269,53 @@ Zotero.AIRecommender = new function() {
 		return base.replace(/\/+$/, '') + '/' + parts.join('/');
 	}
 
-	async function requestJSON(url, headers, body) {
+	/**
+	 * Fetch the model ids available on the configured endpoint.
+	 * OpenAI-compatible servers expose GET {base}/models; Anthropic
+	 * exposes GET {base}/v1/models.
+	 */
+	async function fetchModels(config) {
+		let url, headers = { 'Content-Type': 'application/json' };
+		if (config.provider == 'anthropic') {
+			let base = config.baseUrl;
+			// Accept both https://api.anthropic.com and .../v1
+			if (!/\/v\d+$/.test(base.replace(/\/+$/, ''))) {
+				base = joinURL(base, 'v1');
+			}
+			url = joinURL(base, 'models') + '?limit=100';
+			headers['x-api-key'] = config.apiKey;
+			headers['anthropic-version'] = '2023-06-01';
+			// Required for direct browser access to the Anthropic API
+			headers['anthropic-dangerous-direct-browser-access'] = 'true';
+		}
+		else {
+			url = joinURL(config.baseUrl, 'models');
+			if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
+		}
+		let json = await requestJSON(url, headers, null, 'GET');
+		// Shapes seen in the wild: {data: [{id}]}, {data: ["id"]},
+		// {models: [{id}]}, or a bare array
+		let list = Array.isArray(json) ? json : json.data || json.models || [];
+		if (!Array.isArray(list)) {
+			throw new Error(`Unexpected response: ${JSON.stringify(json).slice(0, 200)}`);
+		}
+		let models = [];
+		for (let entry of list) {
+			let id = typeof entry == 'string' ? entry : entry && entry.id;
+			id = typeof id == 'string' ? id.trim() : '';
+			if (id && !models.includes(id)) models.push(id);
+		}
+		return models;
+	}
+
+	async function requestJSON(url, headers, body, method='POST') {
 		let controller = new AbortController();
 		let timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 		try {
 			let response = await fetch(url, {
-				method: 'POST',
+				method,
 				headers,
-				body: JSON.stringify(body),
+				body: method == 'GET' ? undefined : JSON.stringify(body),
 				signal: controller.signal
 			});
 			let text = await response.text();

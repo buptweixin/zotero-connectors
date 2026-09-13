@@ -74,6 +74,11 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 			aiApply: Zotero.getString('progressWindow_ai_apply'),
 			aiApplied: Zotero.getString('progressWindow_ai_applied'),
 			aiUnavailable: Zotero.getString('progressWindow_ai_unavailable'),
+			aiErrorNotConfigured: Zotero.getString('progressWindow_ai_error_notConfigured'),
+			aiErrorClientUnavailable: Zotero.getString('progressWindow_ai_error_clientUnavailable'),
+			aiDisabled: Zotero.getString('progressWindow_ai_disabled'),
+			aiEnable: Zotero.getString('progressWindow_ai_enable'),
+			aiSettings: Zotero.getString('progressWindow_ai_settings'),
 			aiNoSuggestion: Zotero.getString('progressWindow_ai_noSuggestion'),
 			aiGenerate: Zotero.getString('progressWindow_ai_generate'),
 			aiRetry: Zotero.getString('progressWindow_ai_retry'),
@@ -121,6 +126,7 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 		this.onAISuggestionApply = this.onAISuggestionApply.bind(this);
 		this.onAISuggestionDismiss = this.onAISuggestionDismiss.bind(this);
 		this.onAISuggestionRetry = this.onAISuggestionRetry.bind(this);
+		this.onAISuggestionEnable = this.onAISuggestionEnable.bind(this);
 		this.onConfirmSave = this.onConfirmSave.bind(this);
 		this.onCancelSave = this.onCancelSave.bind(this);
 		this.sendUpdate	= this.sendUpdate.bind(this);
@@ -861,9 +867,18 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 
 	aiSuggestion(data) {
 		let suggestion = data && data.suggestion;
+		if (suggestion && suggestion.disabled) {
+			// Feature is off; offer a one-click jump to its settings
+			this.setState({ aiSuggestion: { status: 'disabled' } });
+			return;
+		}
 		if (!suggestion || suggestion.error) {
 			this.setState({
-				aiSuggestion: { status: 'error', message: suggestion && suggestion.message || '' }
+				aiSuggestion: {
+					status: 'error',
+					code: suggestion && suggestion.error || '',
+					message: suggestion && suggestion.message || ''
+				}
 			});
 			return;
 		}
@@ -928,6 +943,17 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 	onAISuggestionRetry() {
 		this.sendMessage('retryAI');
 		this.setState({ aiSuggestion: { status: 'pending' } });
+		this.handleUserInteraction();
+	}
+
+	/**
+	 * Open the extension preferences (the AI config group lives in the
+	 * General pane) from the "Enable…"/"Settings…" buttons. The progress
+	 * window stays open, so after configuring, "Generate" picks the change
+	 * up without re-saving the page.
+	 */
+	onAISuggestionEnable() {
+		this.sendMessage('openAIPreferences');
 		this.handleUserInteraction();
 	}
 
@@ -1075,15 +1101,43 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 				</span>
 			);
 		}
-		else if (ai.status == 'error') {
+		else if (ai.status == 'disabled') {
+			// The feature is off. Surface it with a jump to its settings plus
+			// a manual trigger for after the user has enabled it there.
 			contents.push(
-				<span key="error" className="ProgressWindow-aiError"
-						title={ai.message || ''}>{this.text.aiUnavailable}</span>
+				<span key="disabled" className="ProgressWindow-aiIdle">{this.text.aiDisabled}</span>
 			);
 			actions = (
 				<React.Fragment>
-					<button key="retry" className="ProgressWindow-aiRetry"
-							onClick={this.onAISuggestionRetry}>{this.text.aiRetry}</button>
+					<button key="enable" className="ProgressWindow-aiRetry"
+							onClick={this.onAISuggestionEnable}>{this.text.aiEnable}</button>
+					<button key="generate" className="ProgressWindow-aiRetry"
+							onClick={this.onAISuggestionRetry}>{this.text.aiGenerate}</button>
+					<button key="dismiss" className="ProgressWindow-aiDismiss"
+							onClick={this.onAISuggestionDismiss}
+							aria-label={this.text.aiDismiss} title={this.text.aiDismiss}>×</button>
+				</React.Fragment>
+			);
+		}
+		else if (ai.status == 'error') {
+			// Explain the common failures instead of a generic "unavailable"
+			let errorText = this.text.aiUnavailable;
+			if (ai.code == 'not-configured') errorText = this.text.aiErrorNotConfigured;
+			else if (ai.code == 'client-unavailable') errorText = this.text.aiErrorClientUnavailable;
+			contents.push(
+				<span key="error" className="ProgressWindow-aiError"
+						title={ai.message || errorText}>{errorText}</span>
+			);
+			// A missing configuration can only be fixed in settings; retrying
+			// would just fail the same way
+			let actionButton = ai.code == 'not-configured'
+				? <button key="settings" className="ProgressWindow-aiRetry"
+						onClick={this.onAISuggestionEnable}>{this.text.aiSettings}</button>
+				: <button key="retry" className="ProgressWindow-aiRetry"
+						onClick={this.onAISuggestionRetry}>{this.text.aiRetry}</button>;
+			actions = (
+				<React.Fragment>
+					{actionButton}
 					<button key="dismiss" className="ProgressWindow-aiDismiss"
 							onClick={this.onAISuggestionDismiss}
 							aria-label={this.text.aiDismiss} title={this.text.aiDismiss}>×</button>
@@ -1325,6 +1379,15 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 		else if (err === "skippedDuplicate") {
 			contents = <span>{Zotero.getString('progressWindow_skippedDuplicate', args[0])}</span>;
 		}
+		else if (err === "updatedExisting") {
+			contents = <span>{Zotero.getString('progressWindow_updatedExisting', args[0])}</span>;
+		}
+		else if (err === "updateFailedExisting") {
+			contents = <span>{Zotero.getString('progressWindow_updateFailedExisting', args[0])}</span>;
+		}
+		else if (err === "revealedDuplicate") {
+			contents = <span>{Zotero.getString('progressWindow_revealedDuplicate', args[0])}</span>;
+		}
 		else if (err === "saveCancelled") {
 			contents = <span>{Zotero.getString('progressWindow_saveCancelled')}</span>;
 		}
@@ -1346,8 +1409,12 @@ Zotero.UI.ProgressWindow = class ProgressWindow extends React.PureComponent {
 			</span>;
 		}
 
+		// Informational notices for the duplicate-update flow reuse the error
+		// channel but render with neutral styling
+		let className = (err === "updatedExisting" || err === "revealedDuplicate")
+			? "ProgressWindow-info" : "ProgressWindow-error";
 		return (
-			<div className="ProgressWindow-error" key={index} role="alert">
+			<div className={className} key={index} role="status">
 				{contents}
 			</div>
 		);

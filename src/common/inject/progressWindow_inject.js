@@ -575,6 +575,13 @@ if (isTopWindow) {
 		Zotero.ItemSaver.retryAIRecommendation(currentSessionID);
 	});
 
+	// Open the extension preferences from the progress window's
+	// "Enable…"/"Settings…" buttons; the AI config group lives in the
+	// General pane, which openPreferences shows by default
+	addMessageListener('progressWindowIframe.openAIPreferences', function() {
+		Zotero.Connector_Browser.openPreferences();
+	});
+
 	// Decision from the progress window's confirm-save bar
 	addMessageListener('progressWindowIframe.confirmSaveDecision', function(decision) {
 		resolveSaveConfirmation(decision == true);
